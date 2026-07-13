@@ -10,11 +10,30 @@ const { runGit } = require('./git');
 
 // Run an arbitrary command, streaming stdout+stderr to onData. Resolves with
 // { code }. Never rejects. Same shape as git.js's runGit(), but for any
-// command. On Windows, `shell:true` is required for spawn() to resolve/exec
-// a .cmd shim (e.g. npm.cmd) the way a real shell would.
+// command. `shell:true` is required on Windows: npm's launcher is npm.cmd, a
+// batch shim, and CreateProcess can't execute those directly (plain
+// child_process.spawn throws EINVAL — unlike node-pty, which handles this
+// itself; see claude.js/CLAUDE.md for the analogous node-pty gotcha). Command
+// + args are joined into a single string rather than passed as a separate
+// args array, which avoids Node's DEP0190 warning (shell:true + an args array
+// means the args are concatenated, not escaped) — safe here since every
+// caller passes fixed literal args (['install'], ['run', 'build']), never
+// anything user-supplied.
 function runCmd(cmd, args, cwd, onData) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, shell: process.platform === 'win32' });
+    // spawn() can throw SYNCHRONOUSLY for some invalid argument combinations
+    // (seen firsthand: EINVAL from an earlier version of this function) —
+    // uncaught, that would crash the whole live server, not just fail this
+    // update. Never let that happen: report it the same way an async
+    // 'error' event below is reported.
+    let child;
+    try {
+      child = spawn([cmd, ...args].join(' '), { cwd, shell: true });
+    } catch (err) {
+      onData(`${cmd} error: ${err.message}\n`);
+      resolve({ code: -1 });
+      return;
+    }
     child.stdout.on('data', d => onData(d.toString()));
     child.stderr.on('data', d => onData(d.toString()));
     child.on('error', (err) => {

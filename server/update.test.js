@@ -92,8 +92,9 @@ describe('runUpdate', () => {
     expect(result.ok).toBe(false);
     expect(result.shouldRestart).toBeUndefined();
     expect(spawn).toHaveBeenCalledTimes(1);
-    expect(spawn.mock.calls[0][0]).toBe('npm');
-    expect(spawn.mock.calls[0][1]).toEqual(['install']);
+    // cmd+args are joined into one shell string (see runCmd's comment for why).
+    expect(spawn.mock.calls[0][0]).toBe('npm install');
+    expect(spawn.mock.calls[0][1]).toMatchObject({ shell: true });
     expect(log.join('')).toMatch(/npm install failed/);
   });
 
@@ -106,7 +107,7 @@ describe('runUpdate', () => {
     expect(result.ok).toBe(false);
     expect(result.shouldRestart).toBeUndefined();
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(spawn.mock.calls[1][1]).toEqual(['run', 'build']);
+    expect(spawn.mock.calls[1][0]).toBe('npm run build');
     expect(log.join('')).toMatch(/build failed/);
   });
 
