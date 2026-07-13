@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { spawnClaude, hasClaudeHistory } = require('./claude');
 const { readUsage } = require('./usage');
+const wakeLock = require('./wakeLock');
 
 // Scrollback cap per session (~256 KB). On overflow we trim from the front so
 // the most recent output is always retained.
@@ -39,6 +40,24 @@ class SessionManager extends EventEmitter {
     super();
     /** @type {Map<string, {pty:any, cwd:string, title:string, status:string, buffer:string}>} */
     this.sessions = new Map();
+    // Count of sessions currently busy, across ALL sessions — the wake lock is
+    // held while this is > 0 and released the moment it drops back to 0, so one
+    // session going idle doesn't cut the lock while another is still running.
+    this._busyCount = 0;
+  }
+
+  // Single choke point for every session.busy transition, so the wake lock stays
+  // correct no matter which code path flips it (normal idle-out, pty exit, or a
+  // session getting closed mid-run).
+  _setBusy(session, busy) {
+    if (session.busy === busy) return;
+    session.busy = busy;
+    this._busyCount += busy ? 1 : -1;
+    if (busy && this._busyCount === 1) wakeLock.acquire();
+    else if (!busy && this._busyCount <= 0) {
+      this._busyCount = 0;
+      wakeLock.release();
+    }
   }
 
   // Serialize a session for the wire (no pty/buffer). `resumable` tells the UI a
@@ -107,7 +126,7 @@ class SessionManager extends EventEmitter {
     this.emit('data', { id: session.id, data });
 
     if (!session.busy) {
-      session.busy = true;
+      this._setBusy(session, true);
       this._emitSession(session);
     }
     clearTimeout(session._idleTimer);
@@ -117,7 +136,7 @@ class SessionManager extends EventEmitter {
   // Transition a session from busy back to idle: refresh usage/preview and,
   // only if the user prompted it since the last idle, announce completion.
   _goIdle(session) {
-    session.busy = false;
+    this._setBusy(session, false);
     session.usage = readUsage(session.cwd);
     session.preview = lastLine(session.buffer);
     this._emitSession(session);
@@ -151,7 +170,7 @@ class SessionManager extends EventEmitter {
       const notice = `\r\n\x1b[33m[Claude exited (code ${exitCode}). Click "Restart Claude" to start again.]\x1b[0m\r\n`;
       this._emitData(session, notice);
       clearTimeout(session._idleTimer);
-      session.busy = false;
+      this._setBusy(session, false);
       session.status = 'stopped';
       // Recheck now that Claude has actually run — a transcript may exist even
       // though _spawn() unconditionally set resumable=false at launch time.
@@ -170,7 +189,7 @@ class SessionManager extends EventEmitter {
     if (!fs.existsSync(session.cwd)) session.cwd = os.homedir();
 
     clearTimeout(session._idleTimer);
-    session.busy = false;
+    this._setBusy(session, false);
     session._sawInput = false;
     session.resumable = false;
     session.status = 'starting';
@@ -277,6 +296,7 @@ class SessionManager extends EventEmitter {
     const session = this.sessions.get(id);
     if (!session) return;
     clearTimeout(session._idleTimer);
+    this._setBusy(session, false);
     if (session.pty) {
       // Detach first so the dying pty's onExit guard short-circuits.
       const dying = session.pty;
@@ -294,6 +314,8 @@ class SessionManager extends EventEmitter {
       clearTimeout(session._idleTimer);
       if (session.pty) { try { session.pty.kill(); } catch {} }
     }
+    this._busyCount = 0;
+    wakeLock.release();
   }
 }
 

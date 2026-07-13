@@ -17,6 +17,7 @@ const fs = require('fs');
 // test entirely.
 const CLAUDE_PATH = require.resolve('./claude');
 const USAGE_PATH = require.resolve('./usage');
+const WAKELOCK_PATH = require.resolve('./wakeLock');
 const SESSION_MANAGER_PATH = require.resolve('./sessionManager');
 
 function fakePty() {
@@ -42,6 +43,9 @@ describe('SessionManager', () => {
     claude = { spawnClaude: vi.fn(), hasClaudeHistory: vi.fn(() => false) };
     require.cache[CLAUDE_PATH] = { id: CLAUDE_PATH, filename: CLAUDE_PATH, loaded: true, exports: claude };
     require.cache[USAGE_PATH] = { id: USAGE_PATH, filename: USAGE_PATH, loaded: true, exports: { readUsage: vi.fn(() => null) } };
+    // Stub wakeLock too — otherwise busy/idle transitions in these tests would
+    // spawn a real PowerShell SetThreadExecutionState helper on Windows.
+    require.cache[WAKELOCK_PATH] = { id: WAKELOCK_PATH, filename: WAKELOCK_PATH, loaded: true, exports: { acquire: vi.fn(), release: vi.fn() } };
     delete require.cache[SESSION_MANAGER_PATH];
     // Force a fresh SessionManager singleton each test WHILE fs.readFileSync
     // is still the real implementation — Node's own module loader uses
