@@ -1,0 +1,130 @@
+/* Theme tokens. Dark is default; light overrides under [data-theme="light"]. */
+:root,
+:root[data-theme='dark'] {
+  --bg: #1a1816;
+  --panel: #211e1b;
+  --panel-2: #262220;
+  --border: #3a352f;
+  --accent: #d97757;
+  --accent-dim: #b85c3e;
+  --text: #e8e3dc;
+  --muted: #9b938a;
+  --danger: #d05050;
+  --ok: #5fbf6b;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.15s;
+  --dur-med: 0.22s;
+}
+
+:root[data-theme='light'] {
+  --bg: #f6f3ee;
+  --panel: #ffffff;
+  --panel-2: #f0ebe4;
+  --border: #ddd5ca;
+  --accent: #c25a3a;
+  --accent-dim: #a8492d;
+  --text: #2b2723;
+  --muted: #7c736a;
+  --danger: #c0392b;
+  --ok: #3f9d4a;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+#app { height: 100vh; }
+
+h1, h2, h3 { font-weight: 600; color: var(--text); }
+
+/* Small uppercase section label — matches the Sidebar section headers;
+   reuse this instead of redeclaring the same four rules per component. */
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+button.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); color: #fff; }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover { background: var(--panel-2); border-color: var(--border); }
+
+input[type='text'], input.manual {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+input[type='text']:focus { outline: none; border-color: var(--accent); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Shared motion utilities — reach for these instead of one-off keyframes so
+   entrances/loading states feel consistent across components. */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.fade-in { animation: fade-in var(--dur-med) var(--ease); }
+.slide-up { animation: slide-up var(--dur-med) var(--ease); }
+.spin { animation: spin 0.8s linear infinite; }
+
+/* Shared overlay/modal primitives used by FolderPicker / Settings / Palette. */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 50;
+  animation: fade-in var(--dur-fast) var(--ease);
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(640px, 92vw);
+  max-height: 82vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  animation: slide-up var(--dur-med) var(--ease);
+}
+.modal h3 { margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 15px; }
+.modal-actions {
+  display: flex; gap: 10px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}

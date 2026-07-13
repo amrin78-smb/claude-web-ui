@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude Code</title>
+<link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
+<style>
+  :root {
+    --bg: #1a1816;
+    --panel: #211e1b;
+    --border: #3a352f;
+    --accent: #d97757;
+    --accent-dim: #b85c3e;
+    --text: #e8e3dc;
+    --muted: #9b938a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #666; transition: background .2s; }
+  .dot.running { background: #5fbf6b; box-shadow: 0 0 8px #5fbf6b88; }
+  .dot.stopped { background: #d05050; }
+
+  .cwd {
+    flex: 1;
+    min-width: 180px;
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;        /* keep the tail (folder name) visible */
+    text-align: left;
+  }
+  .cwd b { color: var(--text); font-weight: 500; }
+
+  button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1816; font-weight: 600; }
+  button.primary:hover { background: var(--accent-dim); }
+
+  #status { font-size: 12px; color: var(--muted); min-width: 90px; }
+
+  #term-wrap {
+    flex: 1;
+    padding: 8px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  #terminal { width: 100%; height: 100%; }
+
+  /* Modal: folder browser */
+  .overlay {
+    position: fixed; inset: 0;
+    background: #000a;
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 50;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: min(640px, 92vw);
+    max-height: 82vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal h3 { margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 15px; }
+  .path-bar {
+    padding: 10px 18px;
+    font-size: 12px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    word-break: break-all;
+  }
+  .dirlist { overflow-y: auto; flex: 1; padding: 6px; }
+  .dirlist .row {
+    padding: 9px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .dirlist .row:hover { background: #2e2a25; }
+  .dirlist .row .ico { opacity: .8; }
+  .modal-actions {
+    display: flex; gap: 10px; justify-content: flex-end;
+    padding: 12px 18px; border-top: 1px solid var(--border);
+  }
+  .hint { font-size: 11px; color: var(--muted); margin-right: auto; align-self: center; }
+  input.manual {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 7px; padding: 7px 10px; font-size: 12px;
+  }
+  .toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #1a1816; font-weight: 600; font-size: 13px;
+    padding: 9px 16px; border-radius: 9px; opacity: 0; pointer-events: none;
+    transition: opacity .25s; z-index: 60;
+  }
+  .toast.show { opacity: 1; }
+
+  /* drag & drop overlay */
+  #dropzone {
+    position: fixed; inset: 0; z-index: 70;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(26,24,22,.82); backdrop-filter: blur(2px);
+  }
+  #dropzone.show { display: flex; }
+  #dropzone .dz-inner {
+    border: 2px dashed var(--accent); border-radius: 16px;
+    padding: 48px 64px; text-align: center; font-size: 22px; font-weight: 600;
+    color: var(--text); background: var(--panel);
+  }
+  #dropzone .dz-inner small { font-size: 13px; font-weight: 400; color: var(--muted); }
+
+  /* settings form */
+  .form-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input[type="text"] {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 7px; padding: 8px 10px; font-size: 13px;
+  }
+  .field input[type="text"]:focus { outline: none; border-color: var(--accent); }
+  .check-row { display: flex; align-items: center; gap: 9px; }
+  .check-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .check-row label { font-size: 13px; color: var(--text); cursor: pointer; }
+  .field-hint { font-size: 11px; color: var(--muted); margin: 2px 0 0 25px; }
+
+  /* sync log */
+  .sync-status {
+    padding: 12px 18px; border-bottom: 1px solid var(--border);
+    font-size: 13px; display: flex; align-items: center; gap: 9px;
+  }
+  .sync-status.ok { color: #6fbf7b; }
+  .sync-status.fail { color: #e07070; }
+  .spinner {
+    width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin .7s linear infinite; flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #sync-log {
+    margin: 0; padding: 12px 18px; background: #161310;
+    font-family: Consolas, "Cascadia Code", monospace; font-size: 12px;
+    color: var(--text); white-space: pre-wrap; word-break: break-word;
+    overflow-y: auto; max-height: 50vh; flex: 1;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <span class="brand"><span class="dot" id="dot"></span> Claude Code</span>
+    <span class="cwd" id="cwd" title=""></span>
+    <button id="btn-folder">📁 Change folder</button>
+    <button id="btn-image" title="Or just press Ctrl+V with an image in your clipboard">🖼 Paste image</button>
+    <button id="btn-attach" title="Attach a PDF / Excel / Word / CSV / any file (or drag &amp; drop onto the page)">📎 Attach file</button>
+    <button id="btn-restart">↻ Restart</button>
+    <button id="btn-sync">⟳ Sync from GitHub</button>
+    <button id="btn-settings">⚙ Settings</button>
+    <span id="status">connecting…</span>
+  </header>
+
+  <div id="term-wrap"><div id="terminal"></div></div>
+
+  <!-- drag & drop target -->
+  <div id="dropzone"><div class="dz-inner">📎 Drop files to attach<br><small>PDF · Excel · Word · CSV · images · anything</small></div></div>
+
+  <!-- folder browser -->
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <h3>Choose working folder</h3>
+      <div class="path-bar" id="modal-path"></div>
+      <div class="dirlist" id="dirlist"></div>
+      <div class="modal-actions">
+        <input class="manual" id="manual-path" placeholder="…or paste a full path and press Enter" />
+        <span class="hint">Opens Claude here</span>
+        <button id="btn-cancel">Cancel</button>
+        <button class="primary" id="btn-usefolder">Use this folder</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- github settings -->
+  <div class="overlay" id="settings-overlay">
+    <div class="modal">
+      <h3>GitHub repo settings</h3>
+      <div class="form-body">
+        <div class="field">
+          <label for="set-repo">Repository URL</label>
+          <input type="text" id="set-repo" placeholder="https://github.com/you/repo.git" />
+        </div>
+        <div class="field">
+          <label for="set-branch">Branch</label>
+          <input type="text" id="set-branch" placeholder="main (leave blank for default)" />
+        </div>
+        <div class="field">
+          <div class="check-row">
+            <input type="checkbox" id="set-autosync" />
+            <label for="set-autosync">Auto-sync on open</label>
+          </div>
+          <div class="field-hint">Pulls/clones the repo into the working folder each time the page opens.</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-settings-cancel">Cancel</button>
+        <button class="primary" id="btn-settings-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- github sync log -->
+  <div class="overlay" id="sync-overlay">
+    <div class="modal">
+      <h3>GitHub sync</h3>
+      <div class="sync-status" id="sync-status"></div>
+      <pre id="sync-log"></pre>
+      <div class="modal-actions">
+        <button id="btn-sync-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- vendored, served from node_modules → works offline -->
+  <script src="/vendor/xterm/xterm.js"></script>
+  <script src="/vendor/addon-fit/addon-fit.js"></script>
+  <script src="/vendor/addon-web-links/addon-web-links.js"></script>
+  <script>
+  (function () {
+    const $ = id => document.getElementById(id);
+
+    // ---- terminal --------------------------------------------------------
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: 'Consolas, "Cascadia Code", "Courier New", monospace',
+      fontSize: 14,
+      theme: {
+        background: '#1a1816', foreground: '#e8e3dc', cursor: '#d97757',
+        selectionBackground: '#d9775744',
+      },
+      allowProposedApi: true,
+      scrollback: 10000,
+    });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch {}
+    term.open($('terminal'));
+    fit.fit();
+
+    // ---- websocket -------------------------------------------------------
+    let ws, started = false;
+    let cfg = { repoUrl: '', branch: '', autoSync: false, cwd: '' };
+    function dims() { return { cols: term.cols, rows: term.rows }; }
+
+    function connect() {
+      ws = new WebSocket(`ws://${location.host}`);
+      ws.onopen = () => {
+        setStatus('connected');
+        const d = dims();
+        ws.send(JSON.stringify({ type: 'start', cols: d.cols, rows: d.rows }));
+        ws.send(JSON.stringify({ type: 'getconfig' }));
+        started = true;
+      };
+      ws.onclose = () => { setStatus('disconnected'); setDot(''); started = false; setTimeout(connect, 1500); };
+      ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data);
+        if (m.type === 'data') term.write(m.data);
+        else if (m.type === 'cwd') setCwd(m.path);
+        else if (m.type === 'status') {
+          setStatus(m.text);
+          if (m.text === 'running') setDot('running');
+          else if (m.text === 'stopped') setDot('stopped');
+          if (/saved/.test(m.text)) toast(m.text);
+        }
+        else if (m.type === 'config') {
+          cfg = {
+            repoUrl: m.repoUrl || '',
+            branch: m.branch || '',
+            autoSync: !!m.autoSync,
+            cwd: m.cwd || '',
+          };
+          // keep settings modal in sync if it happens to be open
+          if ($('settings-overlay').classList.contains('open')) fillSettings();
+        }
+        else if (m.type === 'syncstart') {
+          openSync();
+          $('sync-log').textContent = '';
+          setSyncStatus('syncing', 'Syncing…');
+        }
+        else if (m.type === 'synclog') {
+          const pre = $('sync-log');
+          pre.textContent += (m.data || '');
+          pre.scrollTop = pre.scrollHeight;
+        }
+        else if (m.type === 'syncdone') {
+          setSyncStatus(m.ok ? 'ok' : 'fail',
+            (m.ok ? '✓ ' : '✗ ') + (m.message || (m.ok ? 'Done' : 'Failed')));
+        }
+      };
+    }
+    function sendJSON(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+    term.onData(d => sendJSON({ type: 'input', data: d }));
+
+    // resize handling
+    const ro = new ResizeObserver(() => {
+      try { fit.fit(); } catch {}
+      const d = dims();
+      sendJSON({ type: 'resize', cols: d.cols, rows: d.rows });
+    });
+    ro.observe($('term-wrap'));
+
+    // ---- ui helpers ------------------------------------------------------
+    function setStatus(t) { $('status').textContent = t; }
+    function setDot(c) { $('dot').className = 'dot' + (c ? ' ' + c : ''); }
+    let curCwd = '';
+    function setCwd(p) {
+      curCwd = p;
+      $('cwd').innerHTML = 'Folder: <b>' + p.replace(/</g,'&lt;') + '</b>';
+      $('cwd').title = p;
+    }
+    let toastTimer;
+    function toast(t) {
+      const el = $('toast'); el.textContent = t; el.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+    }
+
+    // ---- restart ---------------------------------------------------------
+    $('btn-restart').onclick = () => { const d = dims(); sendJSON({ type: 'restart', ...d }); };
+
+    // ---- image paste -----------------------------------------------------
+    async function sendImageBlob(blob) {
+      const ext = (blob.type.split('/')[1] || 'png');
+      const buf = await blob.arrayBuffer();
+      let bin = ''; const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      sendJSON({ type: 'image', data: btoa(bin), ext });
+      term.focus();
+    }
+    // Use the CAPTURE phase on document so we intercept the paste BEFORE xterm.js
+    // (which focuses a hidden textarea and stops the event from bubbling to window).
+    // Only swallow the event for images; text pastes fall through to the terminal.
+    document.addEventListener('paste', async (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.type && it.type.startsWith('image/')) {
+          e.preventDefault();
+          e.stopPropagation();
+          const blob = it.getAsFile();
+          if (blob) await sendImageBlob(blob);
+          return;
+        }
+      }
+      // no image in the clipboard → let xterm handle the normal text paste
+    }, true);
+    // explicit button → file picker (for screenshots saved as files, etc.)
+    $('btn-image').onclick = () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*';
+      inp.onchange = () => { if (inp.files[0]) sendImageBlob(inp.files[0]); };
+      inp.click();
+    };
+
+    // ---- attach any document (pdf / xlsx / docx / csv / …) ----------------
+    // Reads the file as a base64 data URL (efficient for big files); the server
+    // strips the data: prefix, saves it under .claude-web-files/, and types the
+    // path into Claude's prompt.
+    function sendFile(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        sendJSON({ type: 'file', name: file.name, data: reader.result });
+        toast('attaching ' + file.name + '…');
+        term.focus();
+      };
+      reader.readAsDataURL(file);
+    }
+    $('btn-attach').onclick = () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.multiple = true;       // any type, multiple allowed
+      inp.onchange = () => { for (const f of inp.files) sendFile(f); };
+      inp.click();
+    };
+
+    // ---- drag & drop files anywhere on the page --------------------------
+    const drop = $('dropzone');
+    let dragDepth = 0;
+    window.addEventListener('dragenter', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+        e.preventDefault(); dragDepth++; drop.classList.add('show');
+      }
+    });
+    window.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+    });
+    window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; drop.classList.remove('show'); } });
+    window.addEventListener('drop', (e) => {
+      if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+      e.preventDefault(); dragDepth = 0; drop.classList.remove('show');
+      for (const f of e.dataTransfer.files) sendFile(f);
+    });
+
+    // ---- folder browser --------------------------------------------------
+    let browsePath = '';
+    async function loadDir(p) {
+      const r = await fetch('/api/dirs?path=' + encodeURIComponent(p));
+      const data = await r.json();
+      if (data.error) { toast(data.error); return; }
+      browsePath = data.path;
+      $('modal-path').textContent = data.path === '__drives__' ? 'This PC (pick a drive)' : data.path;
+      const list = $('dirlist'); list.innerHTML = '';
+      if (data.parent) {
+        const up = document.createElement('div');
+        up.className = 'row'; up.innerHTML = '<span class="ico">⬆</span> .. (up)';
+        up.onclick = () => loadDir(data.parent);
+        list.appendChild(up);
+      }
+      for (const d of data.dirs) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = '<span class="ico">📁</span> ' + d.name.replace(/</g,'&lt;');
+        row.onclick = () => loadDir(d.path);
+        list.appendChild(row);
+      }
+    }
+    $('btn-folder').onclick = () => {
+      $('overlay').classList.add('open');
+      $('manual-path').value = '';
+      loadDir(curCwd || '');
+    };
+    $('btn-cancel').onclick = () => $('overlay').classList.remove('open');
+    $('overlay').onclick = (e) => { if (e.target === $('overlay')) $('overlay').classList.remove('open'); };
+    $('btn-usefolder').onclick = () => {
+      const manual = $('manual-path').value.trim();
+      const target = manual || browsePath;
+      if (!target || target === '__drives__') { toast('pick a folder'); return; }
+      const d = dims();
+      sendJSON({ type: 'setcwd', cwd: target, ...d });
+      $('overlay').classList.remove('open');
+      term.focus();
+    };
+    $('manual-path').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('btn-usefolder').click();
+    });
+
+    // ---- github settings -------------------------------------------------
+    function fillSettings() {
+      $('set-repo').value = cfg.repoUrl || '';
+      $('set-branch').value = cfg.branch || '';
+      $('set-autosync').checked = !!cfg.autoSync;
+    }
+    $('btn-settings').onclick = () => {
+      sendJSON({ type: 'getconfig' });   // refresh from server
+      fillSettings();                     // prefill from cache immediately
+      $('settings-overlay').classList.add('open');
+    };
+    $('btn-settings-cancel').onclick = () => $('settings-overlay').classList.remove('open');
+    $('settings-overlay').onclick = (e) => {
+      if (e.target === $('settings-overlay')) $('settings-overlay').classList.remove('open');
+    };
+    $('btn-settings-save').onclick = () => {
+      const repoUrl = $('set-repo').value.trim();
+      const branch = $('set-branch').value.trim();
+      const autoSync = $('set-autosync').checked;
+      sendJSON({ type: 'saveconfig', repoUrl, branch, autoSync });
+      cfg.repoUrl = repoUrl; cfg.branch = branch; cfg.autoSync = autoSync;
+      $('settings-overlay').classList.remove('open');
+      toast('settings saved');
+      term.focus();
+    };
+
+    // ---- github sync log -------------------------------------------------
+    function setSyncStatus(state, text) {
+      const el = $('sync-status');
+      el.className = 'sync-status' + (state === 'ok' ? ' ok' : state === 'fail' ? ' fail' : '');
+      el.innerHTML = (state === 'syncing' ? '<span class="spinner"></span>' : '') +
+        '<span></span>';
+      el.lastChild.textContent = text;
+    }
+    function openSync() { $('sync-overlay').classList.add('open'); }
+    $('btn-sync').onclick = () => {
+      openSync();
+      $('sync-log').textContent = '';
+      setSyncStatus('syncing', 'Syncing…');
+      sendJSON({ type: 'sync', ...dims() });
+    };
+    $('btn-sync-close').onclick = () => $('sync-overlay').classList.remove('open');
+    $('sync-overlay').onclick = (e) => {
+      if (e.target === $('sync-overlay')) $('sync-overlay').classList.remove('open');
+    };
+
+    connect();
+    setTimeout(() => term.focus(), 200);
+  })();
+  </script>
+</body>
+</html>
