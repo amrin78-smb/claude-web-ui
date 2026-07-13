@@ -54,6 +54,7 @@
     } else if (awaitingReconnect) {
       awaitingReconnect = false;
       updatePhase = 'idle';
+      toast('update successful — app restarted');
     }
   });
 
