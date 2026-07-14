@@ -52,7 +52,7 @@
       const blob = it.getAsFile();
       if (!blob) continue;
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       if (it.type?.startsWith('image/')) {
         // Screenshot / image → image pipeline (.claude-web-images, generic name).
         const ext = (blob.type.split('/')[1] || 'png');
@@ -68,6 +68,26 @@
         toast('attaching ' + name + '…');
       }
       return;
+    }
+
+    // Plain text: send it ourselves, always wrapped in bracketed-paste markers
+    // (ESC[200~ … ESC[201~), instead of letting xterm's own paste handler do
+    // it. xterm only wraps pastes when it believes bracketed-paste mode is
+    // currently on, tracked from escape codes the CLI has sent so far in this
+    // terminal's lifetime — over a long-running session that bookkeeping can
+    // end up stuck off (e.g. the CLI toggles it around a dialog and doesn't
+    // cleanly restore it), and an unwrapped paste can arrive at the CLI's
+    // stdin in several separate OS-level chunks with nothing marking them as
+    // one paste — which Claude then renders as multiple garbled
+    // "[Pasted text #1]...[Pasted text #2]..." fragments instead of one clean
+    // block. Wrapping it explicitly on every paste sidesteps that stuck
+    // state entirely (confirmed via a live test: unwrapped, a 1000-line paste
+    // split into 4 fragments; wrapped, the same paste arrived as one).
+    const text = e.clipboardData?.getData('text/plain');
+    if (text) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      conn.send({ type: 'input', id: session.id, data: '\x1b[200~' + text + '\x1b[201~' });
     }
   }
 
