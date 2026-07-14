@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { config, saveConfig } from '../stores/config';
+  import { config, saveConfig, type SyncRepo } from '../stores/config';
   import { theme, fontSize, type Theme } from '../stores/theme';
   import { showSettings, toast } from '../stores/ui';
   import { notificationsEnabled, soundEnabled, requestNotifications } from '../lib/notify';
@@ -11,6 +11,51 @@
   let repoUrl = $state($config.repoUrl);
   let branch = $state($config.branch);
   let autoSync = $state($config.autoSync);
+
+  // ---- workspace repo sync (clone/pull a fixed list of repos into a fixed
+  // root folder, independent of any session's own cwd) ----
+  let syncWorkDir = $state($config.syncWorkDir);
+  let syncRepos = $state<SyncRepo[]>([...$config.syncRepos]);
+  let newRepoName = $state('');
+  let newRepoUrl = $state('');
+  let newRepoBranch = $state('');
+
+  function addSyncRepo() {
+    const name = newRepoName.trim();
+    const url = newRepoUrl.trim();
+    if (!name || !url) {
+      toast('repo needs a name and a URL');
+      return;
+    }
+    const branch = newRepoBranch.trim();
+    syncRepos = [...syncRepos, branch ? { name, url, branch } : { name, url }];
+    newRepoName = '';
+    newRepoUrl = '';
+    newRepoBranch = '';
+  }
+
+  function removeSyncRepo(index: number) {
+    syncRepos = syncRepos.filter((_, i) => i !== index);
+  }
+
+  type SyncAllPhase = 'idle' | 'running' | 'ok' | 'error';
+  let syncAllPhase = $state<SyncAllPhase>('idle');
+  let syncAllLog = $state('');
+  let syncAllMessage = $state('');
+
+  function runSyncAll() {
+    // Persist whatever's currently in the form first, so a repo you just
+    // added (but haven't hit "Save" for) is included in this run.
+    saveConfig({ syncWorkDir: syncWorkDir.trim(), syncRepos });
+    syncAllLog = '';
+    syncAllMessage = '';
+    syncAllPhase = 'running';
+    conn.send({ type: 'syncall' });
+  }
+
+  function closeSyncAllPanel() {
+    syncAllPhase = 'idle';
+  }
 
   // ---- app self-update ----
   type UpdatePhase = 'idle' | 'confirm' | 'running' | 'ok' | 'error';
@@ -71,6 +116,16 @@
       } else if (m.type === 'updatedone') {
         updateMessage = m.message || '';
         updatePhase = m.ok ? 'ok' : 'error';
+      } else if (m.type === 'syncallstart') {
+        syncAllLog = '';
+        syncAllMessage = '';
+        syncAllPhase = 'running';
+      } else if (m.type === 'syncalllog') {
+        syncAllLog += m.data ?? '';
+      } else if (m.type === 'syncalldone') {
+        syncAllMessage = m.message || '';
+        syncAllPhase = m.ok ? 'ok' : 'error';
+        if (m.ok) toast('workspace repos synced');
       }
     });
     return conn.onStatus((s) => (connStatus = s));
@@ -95,7 +150,13 @@
   }
 
   function save() {
-    saveConfig({ repoUrl: repoUrl.trim(), branch: branch.trim(), autoSync });
+    saveConfig({
+      repoUrl: repoUrl.trim(),
+      branch: branch.trim(),
+      autoSync,
+      syncWorkDir: syncWorkDir.trim(),
+      syncRepos,
+    });
     toast('settings saved');
     close();
   }
@@ -146,6 +207,56 @@
           <div class="hint">
             Pulls/clones the repo into the working folder each time a session opens.
           </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="eyebrow">Workspace repos</div>
+        <div class="hint">
+          Clone/pull a fixed list of repos into their own folders under one root — for
+          syncing several repos at once before you start work, independent of any open
+          session.
+        </div>
+
+        <div class="field">
+          <label for="set-syncdir">Workspace root folder</label>
+          <input
+            id="set-syncdir"
+            type="text"
+            placeholder="D:\Users\you\Documents\NocVault"
+            bind:value={syncWorkDir}
+          />
+        </div>
+
+        {#if syncRepos.length > 0}
+          <div class="repo-list">
+            {#each syncRepos as repo, i (repo.name + repo.url)}
+              <div class="repo-row">
+                <div class="repo-info">
+                  <span class="repo-name">{repo.name}</span>
+                  <span class="repo-url">{repo.url}{repo.branch ? ` @ ${repo.branch}` : ''}</span>
+                </div>
+                <button type="button" class="icon-btn" onclick={() => removeSyncRepo(i)} aria-label="Remove repo">
+                  <Icon name="x" size={14} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <div class="add-repo-row">
+          <input type="text" placeholder="name" bind:value={newRepoName} />
+          <input type="text" placeholder="https://github.com/you/repo.git" bind:value={newRepoUrl} />
+          <input type="text" placeholder="branch (optional)" bind:value={newRepoBranch} />
+          <button type="button" class="icon-btn" onclick={addSyncRepo} aria-label="Add repo">
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+
+        <div class="field">
+          <button type="button" onclick={runSyncAll} disabled={syncAllPhase !== 'idle'}>
+            Sync all repos
+          </button>
         </div>
       </section>
 
@@ -283,6 +394,42 @@
   </div>
 {/if}
 
+{#if syncAllPhase === 'running' || syncAllPhase === 'ok' || syncAllPhase === 'error'}
+  <div class="overlay">
+    <div class="modal update-modal">
+      <h3>
+        {#if syncAllPhase === 'running'}
+          Syncing workspace repos…
+        {:else if syncAllPhase === 'ok'}
+          Sync complete
+        {:else}
+          Sync finished with errors
+        {/if}
+      </h3>
+      <div class="form-body">
+        {#if syncAllPhase === 'running'}
+          <div class="update-status">
+            <span class="spin"><Icon name="refresh" size={14} /></span>
+            Cloning/pulling each repo…
+          </div>
+        {:else if syncAllPhase === 'ok'}
+          <div class="update-status">All repos synced.</div>
+        {:else}
+          <div class="update-status error">
+            {syncAllMessage || 'Sync failed.'} Check the log below for which repo(s) failed.
+          </div>
+        {/if}
+        <pre class="update-log">{syncAllLog || '…'}</pre>
+      </div>
+      <div class="modal-actions">
+        {#if syncAllPhase !== 'running'}
+          <button type="button" onclick={closeSyncAllPanel}>Close</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .form-body {
     padding: 16px 18px;
@@ -367,6 +514,80 @@
     color: var(--text);
     min-width: 42px;
     text-align: right;
+  }
+
+  .repo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .repo-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+  }
+
+  .repo-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .repo-name {
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .repo-url {
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .icon-btn {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    color: var(--muted);
+  }
+
+  .icon-btn:hover {
+    color: var(--text);
+  }
+
+  .add-repo-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .add-repo-row input {
+    min-width: 0;
+  }
+
+  .add-repo-row input:nth-child(1) {
+    flex: 1 1 90px;
+  }
+
+  .add-repo-row input:nth-child(2) {
+    flex: 2 1 160px;
+  }
+
+  .add-repo-row input:nth-child(3) {
+    flex: 1 1 90px;
   }
 
   .update-modal {

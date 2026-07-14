@@ -72,6 +72,55 @@ async function syncRepo(cwd, onData, cfg) {
   return { ok: code === 0, message: code === 0 ? 'up to date' : 'pull failed' };
 }
 
+// Clone-or-pull a fixed LIST of repos into their own subfolders of `workDir`,
+// independent of any session's cwd — e.g. a NocVault-style workspace root
+// containing several sibling repo checkouts. Streams progress via onData.
+// Resolves with { ok, message } — ok is false if any repo failed, but every
+// repo is still attempted (one bad repo shouldn't block the rest).
+async function syncAllRepos(workDir, repos, onData) {
+  if (!workDir) {
+    onData('No workspace folder configured. Set one in Settings.\n');
+    return { ok: false, message: 'no workspace folder configured' };
+  }
+  if (!Array.isArray(repos) || repos.length === 0) {
+    onData('No repos configured. Add one in Settings.\n');
+    return { ok: false, message: 'no repos configured' };
+  }
+
+  fs.mkdirSync(workDir, { recursive: true });
+  let anyFailed = false;
+
+  for (const repo of repos) {
+    const name = String(repo?.name || '').trim();
+    const url = String(repo?.url || '').trim();
+    if (!name || !url) {
+      onData('Skipping a repo with a missing name or URL.\n');
+      anyFailed = true;
+      continue;
+    }
+    const dest = path.join(workDir, name);
+    onData(`\n[${name}] `);
+
+    if (fs.existsSync(path.join(dest, '.git'))) {
+      onData('pulling latest...\n');
+      const { code } = await runGit(['pull', '--ff-only'], dest, onData);
+      if (code !== 0) { onData(`[${name}] pull failed.\n`); anyFailed = true; }
+      else onData(`[${name}] up to date.\n`);
+    } else if (fs.existsSync(dest) && fs.readdirSync(dest).length > 0) {
+      onData("folder exists and isn't empty or a git repo — skipping.\n");
+      anyFailed = true;
+    } else {
+      onData('cloning...\n');
+      const args = ['clone', ...(repo.branch ? ['--branch', repo.branch] : []), url, dest];
+      const { code } = await runGit(args, workDir, onData);
+      if (code !== 0) { onData(`[${name}] clone failed.\n`); anyFailed = true; }
+      else onData(`[${name}] cloned.\n`);
+    }
+  }
+
+  return { ok: !anyFailed, message: anyFailed ? 'some repos failed' : 'all repos synced' };
+}
+
 // Collect (not stream) a working-tree diff summary for `cwd`. Resolves with
 // { ok, isRepo, files:[{path,status,added,removed}], patch }.
 function collectGit(args, cwd) {
@@ -125,4 +174,4 @@ async function gitDiff(cwd) {
   return { ok: true, isRepo: true, files, patch };
 }
 
-module.exports = { runGit, syncRepo, gitDiff };
+module.exports = { runGit, syncRepo, syncAllRepos, gitDiff };

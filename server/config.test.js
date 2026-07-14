@@ -17,6 +17,8 @@ describe('loadConfig', () => {
       cwd: 'C:\\work',
       recents: ['C:\\a', 'C:\\b'],
       pinned: ['C:\\a'],
+      syncWorkDir: 'C:\\NocVault',
+      syncRepos: [{ name: 'x', url: 'https://example.com/x.git' }],
     }));
     expect(loadConfig()).toEqual({
       repoUrl: 'https://example.com/repo.git',
@@ -25,6 +27,8 @@ describe('loadConfig', () => {
       cwd: 'C:\\work',
       recents: ['C:\\a', 'C:\\b'],
       pinned: ['C:\\a'],
+      syncWorkDir: 'C:\\NocVault',
+      syncRepos: [{ name: 'x', url: 'https://example.com/x.git' }],
     });
   });
 
@@ -32,20 +36,25 @@ describe('loadConfig', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ repoUrl: 'x' }));
     expect(loadConfig()).toEqual({
       repoUrl: 'x', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      syncWorkDir: '', syncRepos: [],
     });
   });
 
-  it('coerces non-array recents/pinned to []', () => {
-    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ recents: 'oops', pinned: null }));
+  it('coerces non-array recents/pinned/syncRepos to []', () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(
+      JSON.stringify({ recents: 'oops', pinned: null, syncRepos: 'oops' })
+    );
     const cfg = loadConfig();
     expect(cfg.recents).toEqual([]);
     expect(cfg.pinned).toEqual([]);
+    expect(cfg.syncRepos).toEqual([]);
   });
 
   it('returns all defaults when the file is missing or unreadable', () => {
     vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('ENOENT'); });
     expect(loadConfig()).toEqual({
       repoUrl: '', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      syncWorkDir: '', syncRepos: [],
     });
   });
 
@@ -53,6 +62,7 @@ describe('loadConfig', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue('{not json');
     expect(loadConfig()).toEqual({
       repoUrl: '', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      syncWorkDir: '', syncRepos: [],
     });
   });
 });
@@ -62,7 +72,10 @@ describe('saveConfig', () => {
 
   it('writes pretty-printed JSON to CONFIG_PATH', () => {
     const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
-    const cfg = { repoUrl: 'x', branch: '', autoSync: false, cwd: '', recents: [], pinned: [] };
+    const cfg = {
+      repoUrl: 'x', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      syncWorkDir: '', syncRepos: [],
+    };
     saveConfig(cfg);
     expect(writeSpy).toHaveBeenCalledTimes(1);
     const [, written] = writeSpy.mock.calls[0];

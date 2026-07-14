@@ -17,7 +17,7 @@ const { WebSocketServer } = require('ws');
 const { CLAUDE } = require('./claude');
 const { loadConfig, saveConfig } = require('./config');
 const { listDir } = require('./fs');
-const { syncRepo, gitDiff } = require('./git');
+const { syncRepo, syncAllRepos, gitDiff } = require('./git');
 const { runUpdate } = require('./update');
 const sessions = require('./sessionManager');
 const { getPlanUsage } = require('./planUsage');
@@ -100,6 +100,8 @@ wss.on('connection', (ws) => {
       autoSync: !!cfg.autoSync,
       recents: cfg.recents || [],
       pinned: cfg.pinned || [],
+      syncWorkDir: cfg.syncWorkDir || '',
+      syncRepos: cfg.syncRepos || [],
     });
   }
 
@@ -163,6 +165,8 @@ wss.on('connection', (ws) => {
         if ('autoSync' in msg) cfg.autoSync = !!msg.autoSync;
         if ('recents' in msg) cfg.recents = Array.isArray(msg.recents) ? msg.recents : [];
         if ('pinned' in msg) cfg.pinned = Array.isArray(msg.pinned) ? msg.pinned : [];
+        if ('syncWorkDir' in msg) cfg.syncWorkDir = msg.syncWorkDir || '';
+        if ('syncRepos' in msg) cfg.syncRepos = Array.isArray(msg.syncRepos) ? msg.syncRepos : [];
         saveConfig(cfg);
         const payload = {
           type: 'config',
@@ -171,6 +175,8 @@ wss.on('connection', (ws) => {
           autoSync: !!cfg.autoSync,
           recents: cfg.recents || [],
           pinned: cfg.pinned || [],
+          syncWorkDir: cfg.syncWorkDir || '',
+          syncRepos: cfg.syncRepos || [],
         };
         // Broadcast to all clients so every open tab stays in sync.
         for (const client of wss.clients) {
@@ -198,6 +204,18 @@ wss.on('connection', (ws) => {
         send({ type: 'syncstart', id: msg.id });
         const r = await syncRepo(s.cwd, d => send({ type: 'synclog', id: msg.id, data: d }));
         send({ type: 'syncdone', id: msg.id, ok: r.ok, message: r.message });
+        break;
+      }
+
+      case 'syncall': {
+        // Workspace-level sync (not scoped to a session): clone/pull the
+        // configured list of repos into their own subfolders of syncWorkDir.
+        // Modeled on the 'sync'/'update' handlers above, but for many repos
+        // at once instead of one session's cwd or the app's own root.
+        const cfg = loadConfig();
+        send({ type: 'syncallstart' });
+        const r = await syncAllRepos(cfg.syncWorkDir, cfg.syncRepos, d => send({ type: 'syncalllog', data: d }));
+        send({ type: 'syncalldone', ok: r.ok, message: r.message });
         break;
       }
 

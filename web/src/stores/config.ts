@@ -1,15 +1,27 @@
 import { writable, get } from 'svelte/store';
 import { conn } from '../lib/connection';
 
+export type SyncRepo = { name: string; url: string; branch?: string };
+
 export type Config = {
   repoUrl: string;
   branch: string;
   autoSync: boolean;
   recents: string[];
   pinned: string[];
+  syncWorkDir: string;
+  syncRepos: SyncRepo[];
 };
 
-const DEFAULT: Config = { repoUrl: '', branch: '', autoSync: false, recents: [], pinned: [] };
+const DEFAULT: Config = {
+  repoUrl: '',
+  branch: '',
+  autoSync: false,
+  recents: [],
+  pinned: [],
+  syncWorkDir: '',
+  syncRepos: [],
+};
 
 export const config = writable<Config>({ ...DEFAULT });
 
@@ -22,6 +34,8 @@ conn.on((m) => {
       autoSync: !!m.autoSync,
       recents: m.recents ?? c.recents,
       pinned: m.pinned ?? c.pinned,
+      syncWorkDir: m.syncWorkDir ?? c.syncWorkDir,
+      syncRepos: m.syncRepos ?? c.syncRepos,
     }));
   }
 });
