@@ -90,16 +90,17 @@
   }
 
   // Once the server tells us the update succeeded, it's about to restart —
-  // watch the existing reconnecting-WebSocket status for the drop-then-reconnect
-  // and auto-close the panel once the new process is back up.
+  // watch the existing reconnecting-WebSocket status for the drop-then-reconnect,
+  // then hard-reload — the update just rebuilt the frontend bundle too, and this
+  // tab is still running the OLD one in memory until the page actually reloads.
   $effect(() => {
     if (updatePhase !== 'ok') return;
     if (connStatus !== 'connected') {
       awaitingReconnect = true;
     } else if (awaitingReconnect) {
       awaitingReconnect = false;
-      updatePhase = 'idle';
-      toast('update successful — app restarted');
+      toast('update successful — reloading…');
+      setTimeout(() => location.reload(), 600);
     }
   });
 
