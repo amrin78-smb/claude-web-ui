@@ -10,10 +10,6 @@
     return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
   }
 
-  function costLabel(cost: number): string {
-    return cost < 0.01 && cost > 0 ? '<$0.01' : `$${cost.toFixed(2)}`;
-  }
-
   const recents = $derived($config.recents.filter((p) => !$config.pinned.includes(p)));
 </script>
 
@@ -75,9 +71,6 @@
         >
           <StatusDot status={s.status} size={8} />
           <span class="label">{s.title}</span>
-          {#if s.usage}
-            <span class="cost" title="Estimated cost this conversation">{costLabel(s.usage.costUSD)}</span>
-          {/if}
           <button
             class="ghost icon close"
             title="Close session"
@@ -204,11 +197,6 @@
     border-radius: 5px;
   }
 
-  .cost {
-    flex: none;
-    font-size: 10px;
-    color: var(--muted);
-  }
   .star {
     color: var(--muted);
   }
