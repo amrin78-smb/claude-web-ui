@@ -56,8 +56,6 @@ const WEB_SYSTEM_PROMPT = [
   'and resolvable (NODE_PATH is set), so write a Node script using',
   "`require('pptxgenjs')` and run it with `node` — no install needed. Save outputs in",
   'the current working directory.',
-  'Before any non-trivial multi-step task, apply the fable-method loop.',
-  'After substantive work, run fable-judge before presenting as finished.',
 ].join(' ');
 
 // This app's node_modules — prepended to NODE_PATH so scripts Claude writes can
