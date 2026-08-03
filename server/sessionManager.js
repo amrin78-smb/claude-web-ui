@@ -210,17 +210,23 @@ class SessionManager extends EventEmitter {
     this._emitSession(session);
   }
 
-  // Create a new session, spawn Claude in cwd, broadcast it. Returns wire object.
+  // Create a new session, broadcast it. If Claude already has saved history for
+  // this folder (e.g. transcripts copied over from another machine, not just a
+  // ghost from THIS app's own sessions.json), stop short of spawning and let the
+  // existing "resume last conversation" overlay offer it, instead of silently
+  // starting a fresh conversation over top of it.
   create(cwd, cols = 120, rows = 30) {
     if (!cwd || !fs.existsSync(cwd)) cwd = os.homedir();
     const id = crypto.randomUUID();
+    const priorHistory = hasClaudeHistory(cwd);
     const session = {
       id,
       cwd,
       title: path.basename(cwd) || cwd,
-      status: 'starting',
+      status: priorHistory ? 'stopped' : 'starting',
       buffer: '',
       pty: null,
+      resumable: priorHistory,
       busy: false,
       usage: null,
       preview: '',
@@ -228,7 +234,7 @@ class SessionManager extends EventEmitter {
       _sawInput: false,
     };
     this.sessions.set(id, session);
-    this._spawn(session, cols, rows);
+    if (!priorHistory) this._spawn(session, cols, rows);
     this._persist();
     return this._wire(session);
   }

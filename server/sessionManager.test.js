@@ -71,6 +71,14 @@ describe('SessionManager', () => {
     expect(fs.writeFileSync).toHaveBeenCalled();
   });
 
+  it('create() does not spawn when the folder already has Claude history, and offers resume instead', () => {
+    claude.hasClaudeHistory.mockReturnValue(true);
+    const wire = sessions.create('C:\\proj', 80, 24);
+    expect(wire.status).toBe('stopped');
+    expect(wire.resumable).toBe(true);
+    expect(claude.spawnClaude).not.toHaveBeenCalled();
+  });
+
   it('falls back to the home dir when cwd does not exist', () => {
     fs.existsSync.mockReturnValue(false);
     claude.spawnClaude.mockReturnValue(fakePty());
