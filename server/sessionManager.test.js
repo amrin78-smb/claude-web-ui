@@ -136,6 +136,22 @@ describe('SessionManager', () => {
     expect(replay).toHaveBeenCalledWith('scrollback so far');
   });
 
+  // The frontend relies on this: an inactive tab's terminal is display:none, so
+  // it has never been fitted and only knows xterm's default 80x24. Rather than
+  // report that bogus size, Terminal.svelte omits cols/rows from its attach —
+  // which must leave a running session's pty at whatever size it already had,
+  // instead of reflowing a background Claude's TUI to 80 columns on every reload.
+  it('attach() without cols/rows replays but leaves the pty size alone', () => {
+    const pty = fakePty();
+    claude.spawnClaude.mockReturnValue(pty);
+    const wire = sessions.create('C:\\proj', 120, 30);
+    pty._emitData('scrollback so far');
+    const replay = vi.fn();
+    sessions.attach(wire.id, undefined, undefined, replay);
+    expect(pty.resize).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledWith('scrollback so far');
+  });
+
   it('input() writes to the pty and marks sawInput only on a carriage return', () => {
     const pty = fakePty();
     claude.spawnClaude.mockReturnValue(pty);

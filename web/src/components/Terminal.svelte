@@ -31,6 +31,9 @@
   let unsubStatus: (() => void) | null = null;
   let ro: ResizeObserver | null = null;
   let mounted = false;
+  // True once fit() has actually measured a laid-out host. Until then term.cols/
+  // rows are xterm's 80x24 defaults and must not be reported to the server.
+  let fitted = false;
   let pasteTarget: HTMLTextAreaElement | null = null;
 
   // xterm owns a hidden <textarea> that intercepts paste (and right-click paste)
@@ -99,6 +102,7 @@
     if (!mounted || !host || host.offsetParent === null) return;
     try {
       fit.fit();
+      fitted = true;
       const { cols, rows } = dims();
       conn.send({ type: 'resize', id: session.id, cols, rows });
     } catch {}
@@ -153,9 +157,16 @@
 
     // Attach (replays scrollback buffer, then streams live). Re-attach on reconnect.
     const attach = () => {
-      const { cols, rows } = dims();
       term.reset();
-      conn.send({ type: 'attach', id: session.id, cols, rows });
+      // Only claim a viewport size if this terminal has actually been laid out.
+      // An inactive tab's host is display:none, so doFit() bails and xterm is
+      // still at its 80x24 default — sending that would resize a perfectly
+      // healthy background session's pty and reflow its TUI to 80 columns every
+      // time the page reloads. Omitting cols/rows makes the server leave the pty
+      // alone; the activation $effect fits it when the tab is actually shown.
+      const msg: Record<string, unknown> = { type: 'attach', id: session.id };
+      if (fitted) Object.assign(msg, dims());
+      conn.send(msg);
     };
     unsubStatus = conn.onStatus((s) => { if (s === 'connected') attach(); });
 
