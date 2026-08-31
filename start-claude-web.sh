@@ -19,6 +19,23 @@ export PATH="$HOME/.local/bin:$PATH"
 PORT="${PORT:-4280}"
 URL="http://127.0.0.1:$PORT"
 
+# Open the UI in a dedicated Chromium "app" window: no tab strip, no URL bar,
+# its own icon and its own alt-tab entry, so it behaves like a desktop app
+# rather than a tab that gets lost among twenty others. Falls back to the
+# default browser when no Chromium-family browser is installed.
+# Set CLAUDE_WEB_BROWSER=tab to force an ordinary browser tab instead.
+open_ui() {
+  if [ "${CLAUDE_WEB_BROWSER:-app}" = "app" ]; then
+    for b in google-chrome google-chrome-stable brave-browser chromium chromium-browser; do
+      if command -v "$b" >/dev/null 2>&1; then
+        "$b" --app="$URL" >/dev/null 2>&1 &
+        return
+      fi
+    done
+  fi
+  xdg-open "$URL" >/dev/null 2>&1 &
+}
+
 die() { echo; echo "ERROR: $1"; echo; read -rp "Press Enter to close. "; exit 1; }
 
 command -v node >/dev/null 2>&1 || die "Node.js is required but was not found.
@@ -27,7 +44,7 @@ Install it from https://nodejs.org, or unpack the LTS tarball into ~/.local."
 # Already running? Don't fight for the port — just show the existing instance.
 if curl -fsS -o /dev/null --max-time 2 "$URL" 2>/dev/null; then
   echo "Claude Code Web UI is already running at $URL — opening it."
-  xdg-open "$URL" >/dev/null 2>&1 &
+  open_ui
   exit 0
 fi
 
@@ -46,12 +63,12 @@ command -v git >/dev/null 2>&1 || \
 command -v claude >/dev/null 2>&1 || \
   echo "Note: the Claude CLI was not found. Install it with: npm install -g @anthropic-ai/claude-code"
 
-# Open the browser only once the server answers (up to ~15s), so the tab never
-# lands on a connection-refused page.
+# Open the window only once the server answers (up to ~15s), so it never lands
+# on a connection-refused page.
 (
   for _ in $(seq 1 30); do
     if curl -fsS -o /dev/null --max-time 1 "$URL" 2>/dev/null; then
-      xdg-open "$URL" >/dev/null 2>&1
+      open_ui
       break
     fi
     sleep 0.5

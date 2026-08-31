@@ -42,11 +42,24 @@ equivalents in this folder:
 ```
 
 `start-claude-web.sh` installs dependencies and builds the UI on first run,
-opens your browser once the server is actually answering, then runs the server
-in that terminal — close the window or press Ctrl+C to stop it. Started while a
-server is already up, it just reopens the browser instead of fighting for the
+opens the UI once the server is actually answering, then runs the server in
+that terminal — close the window or press Ctrl+C to stop it. Started while a
+server is already up, it just reopens the window instead of fighting for the
 port. `stop-claude-web.sh` sends SIGTERM via `server.pid` (the same graceful
 path as Ctrl+C), falling back to whatever is listening on the port.
+
+The UI opens in a dedicated Chrome/Brave **app window** (`--app=`) — no tab
+strip, no URL bar, its own icon and alt-tab entry — so it behaves like a desktop
+app instead of a tab that gets lost among twenty others. If no Chromium-family
+browser is installed it falls back to your default browser. To force an ordinary
+tab instead:
+
+```bash
+CLAUDE_WEB_BROWSER=tab ./start-claude-web.sh
+```
+
+Note that a browser still intercepts a few keys before the terminal sees them
+(`Ctrl+R`, `Ctrl+D`, `Ctrl+P`), which an app window doesn't change.
 
 There's no `Install.bat` equivalent — winget is Windows-only — so install the
 prerequisites yourself: **Node.js LTS**, **git**, and the **Claude Code CLI**. A
