@@ -31,6 +31,50 @@ a `server.pid` file the server writes on startup) and closes it the same way
 Ctrl+C would, so open Claude sessions get cleaned up properly instead of just
 being killed.
 
+## Run it on Linux
+
+The `.bat`/`.vbs` launchers above are Windows-only. On Linux use the shell
+equivalents in this folder:
+
+```bash
+./start-claude-web.sh    # or just: npm start
+./stop-claude-web.sh     # the "Stop Claude Web.bat" equivalent
+```
+
+`start-claude-web.sh` installs dependencies and builds the UI on first run,
+opens your browser once the server is actually answering, then runs the server
+in that terminal — close the window or press Ctrl+C to stop it. Started while a
+server is already up, it just reopens the browser instead of fighting for the
+port. `stop-claude-web.sh` sends SIGTERM via `server.pid` (the same graceful
+path as Ctrl+C), falling back to whatever is listening on the port.
+
+There's no `Install.bat` equivalent — winget is Windows-only — so install the
+prerequisites yourself: **Node.js LTS**, **git**, and the **Claude Code CLI**. A
+user-local Node unpacked into `~/.local` works fine; the launcher prepends
+`~/.local/bin` to `PATH`, which matters because a desktop launcher otherwise
+starts with a minimal environment that omits it.
+
+For a menu entry, create `~/.local/share/applications/claude-web-ui.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=Claude Code
+Comment=Run Claude Code in your browser
+Exec=/full/path/to/claude-web-ui/start-claude-web.sh
+Path=/full/path/to/claude-web-ui
+Icon=claude-web-ui
+Terminal=true
+Categories=Development;
+```
+
+Point `Exec`/`Path` at wherever you cloned this repo, copy
+`web/public/favicon.svg` to
+`~/.local/share/icons/hicolor/scalable/apps/claude-web-ui.svg` for the icon,
+then run `update-desktop-database ~/.local/share/applications`. Copying that
+same `.desktop` file to `~/Desktop` and marking it executable gives you a
+desktop shortcut (GNOME/Zorin may ask you to *Allow Launching* on first click).
+
 ## Features
 
 - **Real terminal** — the full Claude Code TUI, right in the browser.
