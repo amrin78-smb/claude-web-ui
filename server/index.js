@@ -72,7 +72,29 @@ app.get('/api/plan-usage', async (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Browsers do NOT apply same-origin policy to WebSockets — they send an Origin
+// header and leave the decision to the server. Without this check, any page the
+// user happens to have open in the same browser could connect to
+// ws://127.0.0.1:4280/ws and drive a Claude running with
+// --dangerously-skip-permissions: enumerate sessions, create one in any folder,
+// type into it, write files through the image/file handlers. Binding to
+// 127.0.0.1 does not help — that's about the network, not about other tabs.
+//
+// Non-browser clients (the scripted protocol tests, e.g. ws-life.js) send no
+// Origin at all, and a page cannot suppress or forge its own Origin, so
+// allowing the empty case keeps those working without weakening the check.
+const ALLOWED_ORIGINS = new Set([
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
+  'http://127.0.0.1:5173', // vite dev server (npm run dev) proxies /ws here
+  'http://localhost:5173',
+]);
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  verifyClient: ({ origin }) => !origin || ALLOWED_ORIGINS.has(origin),
+});
 
 // ---- WebSocket: each connection is a subscriber to sessionManager --------
 wss.on('connection', (ws) => {
