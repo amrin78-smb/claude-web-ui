@@ -236,6 +236,12 @@ class SessionManager extends EventEmitter {
     this.sessions.set(id, session);
     if (!priorHistory) this._spawn(session, cols, rows);
     this._persist();
+    // Announce the new session to EVERY subscriber, not just the socket that
+    // asked for it — otherwise a session opened in one browser tab never shows
+    // up in the others. ('closed' was already broadcast, so the asymmetry meant
+    // a second tab could watch sessions disappear but never appear.) Harmless
+    // when _spawn already emitted: the client upserts by id.
+    this._emitSession(session);
     return this._wire(session);
   }
 

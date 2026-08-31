@@ -52,7 +52,17 @@ conn.on((m) => {
       if (m.session.cwd) addRecent(m.session.cwd);
       break;
     case 'session':
-      sessions.update((l) => l.map((s) => (s.id === m.session.id ? { ...s, ...m.session } : s)));
+      // Upsert, don't just map: a 'session' event can be the first time THIS tab
+      // hears about a session another tab created, in which case there's nothing
+      // to map over yet.
+      sessions.update((l) => {
+        if (l.some((s) => s.id === m.session.id)) {
+          return l.map((s) => (s.id === m.session.id ? { ...s, ...m.session } : s));
+        }
+        const next = [...l, m.session];
+        ensureActive(next); // a tab that had nothing open should select it
+        return next;
+      });
       break;
     case 'closed':
       sessions.update((l) => {
