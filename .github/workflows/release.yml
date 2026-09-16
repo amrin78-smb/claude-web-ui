@@ -46,8 +46,18 @@ jobs:
           deb=$(ls dist-pkg/*.deb)
           echo "Verifying $deb"
           dpkg-deb --info "$deb"
-          dpkg-deb --contents "$deb" | grep -q 'opt/claude-web-ui/server/index.js'
-          sudo dpkg -i "$deb"
+          # Write --contents to a file before grepping: `grep -q` exits on the
+          # first match and closes the pipe, which kills dpkg-deb's tar with
+          # EPIPE and prints an alarming "tar subprocess returned error".
+          dpkg-deb --contents "$deb" > contents.txt
+          grep -q 'opt/claude-web-ui/server/index.js' contents.txt
+          # Install with apt, not `dpkg -i`: setup-node puts node in the runner
+          # tool cache, which does not satisfy `Depends: nodejs (>= 18)`, so dpkg
+          # unpacks but refuses to configure. Going through apt pulls the archive
+          # nodejs in and so also proves that dependency is satisfiable on stock
+          # Ubuntu -- something `--force-depends` would have hidden.
+          sudo apt-get update
+          sudo apt-get install -y "./$deb"
           claude-web-ui &
           for i in $(seq 1 20); do
             sleep 1
