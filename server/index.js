@@ -246,6 +246,25 @@ wss.on('connection', (ws) => {
         // repo, npm install + build, stream output bracketed by start/done, then
         // — only on full success — restart this server process. Modeled on the
         // 'sync' handler above, but against the app's own root, not a session's cwd.
+        // A restart kills every live pty, so a session mid-turn can lose the
+        // reply it was streaming. The client warns about that before confirming
+        // and sets `force` once the user has seen the warning. Re-check here
+        // anyway: the dialog is a snapshot, and a session can start working
+        // between the user reading it and clicking Update.
+        const active = sessions.activeSessions();
+        if (active.busy.length && !msg.force) {
+          const names = active.busy.map(s => s.title).join(', ');
+          const plural = active.busy.length > 1;
+          send({
+            type: 'updatedone',
+            ok: false,
+            restarting: false,
+            message: `${names} started working while the confirmation was open. ` +
+              `Nothing was changed — try again once ${plural ? 'they are' : 'it is'} finished.`,
+          });
+          break;
+        }
+
         send({ type: 'updatestart' });
         const r = await runUpdate(d => send({ type: 'updatelog', data: d }));
         const restarting = !!(r.ok && r.shouldRestart);

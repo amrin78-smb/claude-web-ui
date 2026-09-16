@@ -207,4 +207,49 @@ describe('SessionManager', () => {
     expect(onIdle).toHaveBeenCalledTimes(1);
     expect(onIdle).toHaveBeenCalledWith(expect.objectContaining({ id: wire.id }));
   });
+
+  // activeSessions() backs the "don't update while a session is busy" warning,
+  // so it has to split live sessions by cost: mid-turn (can lose a streaming
+  // reply) vs live-but-idle (only loses scrollback). Ghosts count as neither.
+  describe('activeSessions', () => {
+    it('reports nothing when there are no sessions', () => {
+      expect(sessions.activeSessions()).toEqual({ busy: [], idle: [] });
+    });
+
+    it('classifies a live session as idle until it produces output', () => {
+      vi.useFakeTimers();
+      const pty = fakePty();
+      claude.spawnClaude.mockReturnValue(pty);
+      const wire = sessions.create('C:\\proj', 80, 24);
+
+      expect(sessions.activeSessions()).toEqual({
+        busy: [],
+        idle: [{ id: wire.id, title: 'proj' }],
+      });
+
+      // Streaming output flips it to busy...
+      pty._emitData('working');
+      expect(sessions.activeSessions()).toEqual({
+        busy: [{ id: wire.id, title: 'proj' }],
+        idle: [],
+      });
+
+      // ...and it drops back to idle once output stops.
+      vi.advanceTimersByTime(1600);
+      expect(sessions.activeSessions()).toEqual({
+        busy: [],
+        idle: [{ id: wire.id, title: 'proj' }],
+      });
+    });
+
+    it('ignores stopped sessions, which have no pty to lose', () => {
+      const pty = fakePty();
+      claude.spawnClaude.mockReturnValue(pty);
+      sessions.create('C:\\proj', 80, 24);
+
+      pty._emitExit(0);
+
+      expect(sessions.activeSessions()).toEqual({ busy: [], idle: [] });
+    });
+  });
 });

@@ -5,6 +5,7 @@
   import { showSettings, toast } from '../stores/ui';
   import { notificationsEnabled, soundEnabled, requestNotifications } from '../lib/notify';
   import { conn, type ConnStatus } from '../lib/connection';
+  import { sessions } from '../stores/sessions';
   import Icon from './Icon.svelte';
 
   // Initialize local form state from the current config snapshot.
@@ -65,6 +66,29 @@
   let connStatus = $state<ConnStatus>('connecting');
   let awaitingReconnect = $state(false);
 
+  // Updating restarts the server, which kills every live pty. That costs two
+  // different things, so the confirm dialog names them separately: a session
+  // mid-turn can lose the reply Claude is still streaming, while a live-but-idle
+  // one only loses its scrollback and comes back needing Resume.
+  let liveSessions = $derived($sessions.filter((s) => s.status !== 'stopped'));
+  let busySessions = $derived(liveSessions.filter((s) => s.busy));
+  let idleSessions = $derived(liveSessions.filter((s) => !s.busy));
+
+  let busyNote = $derived(
+    busySessions.length === 1
+      ? '1 session is working right now — restarting will cut it off mid-turn:'
+      : `${busySessions.length} sessions are working right now — restarting will cut them off mid-turn:`
+  );
+  let idleNote = $derived(
+    idleSessions.length === 0
+      ? ''
+      : `${idleSessions.length} ${busySessions.length ? 'other ' : ''}session${
+          idleSessions.length === 1 ? ' is' : 's are'
+        } running but idle — ${
+          idleSessions.length === 1 ? "it'll" : "they'll"
+        } come back as “stopped” and need Resume, and terminal scrollback is lost.`
+  );
+
   function askUpdate() {
     updatePhase = 'confirm';
   }
@@ -82,7 +106,10 @@
     updateMessage = '';
     awaitingReconnect = false;
     updatePhase = 'running';
-    conn.send({ type: 'update' });
+    // `force` means "the user saw the busy warning and chose to go ahead". Sending
+    // it only in that case lets the server catch a session that went busy while
+    // this dialog was open.
+    conn.send({ type: 'update', force: busySessions.length > 0 });
   }
 
   function closeUpdatePanel() {
@@ -342,15 +369,28 @@
     <div class="modal update-modal">
       <h3>Update app?</h3>
       <div class="form-body">
+        {#if busySessions.length}
+          <p class="update-warn"><strong>{busyNote}</strong></p>
+          <ul class="warn-list">
+            {#each busySessions as s (s.id)}
+              <li>{s.title}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if idleNote}
+          <p>{idleNote}</p>
+        {/if}
         <p>
           This pulls the latest code, reinstalls dependencies, rebuilds, and restarts the
-          server. Every open Claude session will disconnect — you'll be able to resume them
-          afterward, but nothing in progress right now will keep streaming. Continue?
+          server. Your Claude conversation history is safe either way — it's stored by the
+          CLI itself, not by this app.
         </p>
       </div>
       <div class="modal-actions">
         <button type="button" onclick={cancelUpdate}>Cancel</button>
-        <button type="button" class="primary" onclick={confirmUpdate}>Update</button>
+        <button type="button" class="primary" onclick={confirmUpdate}>
+          {busySessions.length ? 'Update anyway' : 'Update'}
+        </button>
       </div>
     </div>
   </div>
@@ -611,6 +651,18 @@
   }
 
   .update-status.error {
+    color: var(--danger);
+  }
+
+  .update-warn {
+    margin: 0 0 6px;
+    color: var(--danger);
+  }
+
+  .warn-list {
+    margin: 0 0 12px;
+    padding-left: 20px;
+    font-size: 13px;
     color: var(--danger);
   }
 

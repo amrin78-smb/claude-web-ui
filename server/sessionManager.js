@@ -76,6 +76,23 @@ class SessionManager extends EventEmitter {
     return [...this.sessions.values()].map(s => this._wire(s));
   }
 
+  // Sessions a server restart would disrupt, split by what it actually costs.
+  // 'busy' ones are mid-turn — killing the pty can truncate the reply Claude is
+  // still streaming. 'idle' ones only lose their live pty and scrollback, and
+  // come back as resumable ghosts. Used to warn before a self-update restart.
+  activeSessions() {
+    const busy = [];
+    const idle = [];
+    for (const s of this.sessions.values()) {
+      // Keyed off status, not `pty`: a session that exited on its own keeps the
+      // reference to its dead pty (onExit only flips status), so `pty` would
+      // still be truthy for a ghost. This also matches what the client filters on.
+      if (s.status === 'stopped') continue;
+      (s.busy ? busy : idle).push({ id: s.id, title: s.title });
+    }
+    return { busy, idle };
+  }
+
   // Persist the current open-session list (metadata only) to disk.
   _persist() {
     try {

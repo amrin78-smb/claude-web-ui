@@ -104,12 +104,24 @@ There's no end-to-end browser test harness. Before committing a change:
 ## Self-update
 
 The Settings panel has an "Update app" action (confirm dialog -> streamed
-progress panel). Client sends `{type:'update'}`; server replies
+progress panel). Client sends `{type:'update', force}`; server replies
 `{type:'updatestart'}`, zero-or-more `{type:'updatelog', data}`, then one
-`{type:'updatedone', ok, message, restarting}`. `server/update.js`
-(`runUpdate()`) does `git pull --ff-only` + `npm install` + `npm run build` in
-the app's own directory (`path.join(__dirname, '..')`, never a session's
-cwd), stopping at the first failure so a broken pull/install/build never
+`{type:'updatedone', ok, message, restarting}`.
+
+Because the restart kills every live pty, the confirm dialog names the sessions
+it would disrupt, split by cost: `sessionManager.activeSessions()` returns
+`{busy, idle}`, where **busy** means output is still streaming (that session
+can lose the reply mid-turn) and **idle** means a live pty that only loses its
+scrollback. `force: true` means "the user saw the busy warning and chose to go
+ahead"; the server re-checks `activeSessions()` on arrival and refuses without
+it, which catches a session that started working while the dialog sat open.
+Note `busy` is inferred from output plus an idle timer, so it *under*-reports —
+a session parked on a permission prompt emits nothing and reads as idle. That's
+why this warns rather than blocks.
+
+`server/update.js` (`runUpdate()`) does `git pull --ff-only` + `npm install` +
+`npm run build` in the app's own directory (`path.join(__dirname, '..')`, never
+a session's cwd), stopping at the first failure so a broken pull/install/build never
 triggers a restart. On full success, `server/index.js`'s `case 'update':`
 spawns a new detached process running the same entrypoint, then calls the
 existing `shutdown()`. Because the new process may race the old one for port
