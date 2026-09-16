@@ -48,6 +48,12 @@ is for whoever (human or Claude) is editing the code.
     historical record of the old machine rather than something used to locate
     anything. Restoring rewrites files the running `sessionManager` owns, so
     it needs a restart to take effect; backing up is read-only and safe live.
+    In practice it doesn't need one: a restore is only meaningful when nothing
+    is running, so `index.js` calls `sessionManager.reloadFromDisk()`
+    afterwards, which refuses while any pty is live and otherwise re-reads
+    `sessions.json` and broadcasts the new list to every tab. Without that
+    reload the next `_persist()` would overwrite the restore with the stale
+    in-memory list.
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.

@@ -164,7 +164,8 @@ function createBackup(destDir, opts = {}) {
   fs.writeFileSync(path.join(destDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   return {
     ok: true,
-    message: `Backed up ${plan.sessionCount} sessions and ${copied} project histories.`,
+    message: `Backed up ${plan.sessionCount} sessions and ${copied} project ` +
+      `${copied === 1 ? 'history' : 'histories'}.`,
     manifest,
     totalBytes: includeTranscripts ? plan.totalBytes : 0,
   };
@@ -261,7 +262,7 @@ async function restoreBackup(srcDir, opts = {}) {
           const tmp = full + '.remap';
           const n = await rewriteTranscript(full, tmp, rules);
           fs.renameSync(tmp, full);
-          log.push(`remapped ${n} records in ${p.slug}/${f}`);
+          log.push(`remapped ${n} ${n === 1 ? 'record' : 'records'} in ${p.slug}/${f}`);
         }
       }
       restored++;
@@ -270,7 +271,8 @@ async function restoreBackup(srcDir, opts = {}) {
 
   return {
     ok: true,
-    message: `Restored ${kept.length} sessions and ${restored} project histories` +
+    message: `Restored ${kept.length} sessions and ${restored} project ` +
+      `${restored === 1 ? 'history' : 'histories'}` +
       (dropped ? `, skipped ${dropped} whose folder is missing here.` : '.'),
     log,
   };

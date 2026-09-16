@@ -19,6 +19,7 @@ const { loadConfig, saveConfig } = require('./config');
 const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff } = require('./git');
 const { runUpdate } = require('./update');
+const { planBackup, createBackup, restoreBackup } = require('./backup');
 const sessions = require('./sessionManager');
 const { getPlanUsage } = require('./planUsage');
 
@@ -107,10 +108,13 @@ wss.on('connection', (ws) => {
   const onSession = ({ session }) => send({ type: 'session', session });
   const onClosed = ({ id }) => send({ type: 'closed', id });
   const onIdle = ({ id, title, preview }) => send({ type: 'idle', id, title, preview });
+  // A restore replaces the whole session list; push the new one to every tab.
+  const onReloaded = ({ sessions: list }) => send({ type: 'sessions', sessions: list });
   sessions.on('data', onData);
   sessions.on('session', onSession);
   sessions.on('closed', onClosed);
   sessions.on('idle', onIdle);
+  sessions.on('reloaded', onReloaded);
 
   // Reply with the current config (normalized shape from config.js).
   function sendConfig() {
@@ -241,6 +245,75 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'backupplan': {
+        // What a backup would contain, so the UI can show the size before
+        // someone copies hundreds of megabytes onto a USB stick.
+        try {
+          send({ type: 'backupplan', ok: true, ...planBackup() });
+        } catch (err) {
+          send({ type: 'backupplan', ok: false, message: err.message });
+        }
+        break;
+      }
+
+      case 'backup': {
+        // Read-only with respect to this app's live state, so it's safe to run
+        // with sessions open — unlike restore.
+        send({ type: 'backupstart' });
+        try {
+          const r = createBackup(msg.dest, { includeTranscripts: msg.includeTranscripts !== false });
+          send({ type: 'backupdone', ok: r.ok, message: r.message, totalBytes: r.totalBytes || 0 });
+        } catch (err) {
+          send({ type: 'backupdone', ok: false, message: err.message });
+        }
+        break;
+      }
+
+      case 'restoreplan': {
+        // Dry run: says what would land where, and which sessions would be
+        // dropped because their folder isn't on this machine.
+        try {
+          const r = await restoreBackup(msg.src, { remap: msg.remap, dryRun: true });
+          send({ type: 'restoreplan', ...r });
+        } catch (err) {
+          send({ type: 'restoreplan', ok: false, message: err.message });
+        }
+        break;
+      }
+
+      case 'restore': {
+        // Restore replaces config.json and sessions.json wholesale. The running
+        // sessionManager owns those files, so afterwards it has to re-read them
+        // or its stale in-memory list would overwrite the restore on the next
+        // change. reloadFromDisk() refuses while anything is live, which is also
+        // the honest guard here: you can't swap the session list out from under
+        // a running pty.
+        const live = sessions.activeSessions();
+        if ((live.busy.length || live.idle.length) && !msg.force) {
+          const names = [...live.busy, ...live.idle].map(s => s.title).join(', ');
+          send({
+            type: 'restoredone', ok: false,
+            message: `Close or stop the running sessions first (${names}). ` +
+              `A restore replaces the whole session list, so nothing can be running.`,
+          });
+          break;
+        }
+        send({ type: 'restorestart' });
+        try {
+          const r = await restoreBackup(msg.src, { remap: msg.remap });
+          let reloaded = false;
+          if (r.ok) {
+            const rl = sessions.reloadFromDisk();
+            reloaded = rl.ok;
+            if (!rl.ok) r.log = [...(r.log || []), `could not reload sessions: ${rl.reason} — restart to pick them up`];
+          }
+          send({ type: 'restoredone', ok: r.ok, message: r.message, log: r.log || [], reloaded });
+        } catch (err) {
+          send({ type: 'restoredone', ok: false, message: err.message });
+        }
+        break;
+      }
+
       case 'update': {
         // App-level self-update (not scoped to a session): pull the app's own
         // repo, npm install + build, stream output bracketed by start/done, then
@@ -337,6 +410,7 @@ wss.on('connection', (ws) => {
     sessions.off('session', onSession);
     sessions.off('closed', onClosed);
     sessions.off('idle', onIdle);
+    sessions.off('reloaded', onReloaded);
   });
 });
 

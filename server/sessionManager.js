@@ -93,6 +93,21 @@ class SessionManager extends EventEmitter {
     return { busy, idle };
   }
 
+  // Re-read sessions.json, replacing the in-memory list. A restore rewrites
+  // that file behind our back, and without this the next _persist() would
+  // clobber the restored list with our stale in-memory copy. Refuses while
+  // anything is live: this swaps out the whole list, and a running pty would be
+  // left with no entry to belong to.
+  reloadFromDisk() {
+    for (const s of this.sessions.values()) {
+      if (s.status !== 'stopped') return { ok: false, reason: 'a session is still running' };
+    }
+    this.sessions.clear();
+    const count = this.restore();
+    this.emit('reloaded', { sessions: this.list() });
+    return { ok: true, count };
+  }
+
   // Persist the current open-session list (metadata only) to disk.
   _persist() {
     try {

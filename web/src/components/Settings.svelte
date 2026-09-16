@@ -93,6 +93,79 @@
     updatePhase = 'confirm';
   }
 
+  // ---- backup / restore ----
+  // Two things travel together when you move machines: this app's session list,
+  // and the Claude CLI's conversation history for each of those folders. The
+  // history is the big part (hundreds of MB), so the size is shown up front.
+  type BackupPhase = 'idle' | 'confirm' | 'running' | 'ok' | 'error';
+  let backupPhase = $state<BackupPhase>('idle');
+  let backupDest = $state('');
+  let backupIncludeHistory = $state(true);
+  let backupMessage = $state('');
+  let backupPlan = $state<{ sessionCount: number; totalBytes: number } | null>(null);
+
+  type RestorePhase = 'idle' | 'confirm' | 'running' | 'ok' | 'error';
+  let restorePhase = $state<RestorePhase>('idle');
+  let restoreSrc = $state('');
+  let restoreFrom = $state('');
+  let restoreTo = $state('');
+  let restoreMessage = $state('');
+  let restoreLog = $state<string[]>([]);
+  let restorePreview = $state<{ message: string; log: string[] } | null>(null);
+
+  function humanBytes(n: number) {
+    if (!n) return '0';
+    if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + ' KB';
+    return n >= 1024 * 1024 * 1024
+      ? (n / 1024 / 1024 / 1024).toFixed(1) + ' GB'
+      : (n / 1024 / 1024).toFixed(0) + ' MB';
+  }
+
+  // The remap is only sent when both halves are filled in; a half-filled pair
+  // would silently rewrite nothing and look like the feature is broken.
+  function remapArg() {
+    const from = restoreFrom.trim();
+    const to = restoreTo.trim();
+    return from && to ? { [from]: to } : undefined;
+  }
+
+  function askBackup() {
+    backupMessage = '';
+    backupPlan = null;
+    backupPhase = 'confirm';
+    conn.send({ type: 'backupplan' });
+  }
+
+  function confirmBackup() {
+    if (!backupDest.trim()) { toast('pick a destination folder'); return; }
+    backupMessage = '';
+    backupPhase = 'running';
+    conn.send({ type: 'backup', dest: backupDest.trim(), includeTranscripts: backupIncludeHistory });
+  }
+
+  function askRestore() {
+    restoreMessage = '';
+    restoreLog = [];
+    restorePreview = null;
+    restorePhase = 'confirm';
+  }
+
+  function previewRestore() {
+    if (!restoreSrc.trim()) { toast('pick the backup folder'); return; }
+    restorePreview = null;
+    conn.send({ type: 'restoreplan', src: restoreSrc.trim(), remap: remapArg() });
+  }
+
+  function confirmRestore() {
+    if (!restoreSrc.trim()) { toast('pick the backup folder'); return; }
+    restoreMessage = '';
+    restorePhase = 'running';
+    conn.send({ type: 'restore', src: restoreSrc.trim(), remap: remapArg() });
+  }
+
+  function closeBackup() { backupPhase = 'idle'; }
+  function closeRestore() { restorePhase = 'idle'; }
+
   function cancelUpdate() {
     updatePhase = 'idle';
   }
@@ -144,6 +217,22 @@
       } else if (m.type === 'updatedone') {
         updateMessage = m.message || '';
         updatePhase = m.ok ? 'ok' : 'error';
+      } else if (m.type === 'backupplan') {
+        backupPlan = m.ok ? { sessionCount: m.sessionCount, totalBytes: m.totalBytes } : null;
+        if (!m.ok) backupMessage = m.message || '';
+      } else if (m.type === 'backupdone') {
+        backupMessage = m.message || '';
+        backupPhase = m.ok ? 'ok' : 'error';
+      } else if (m.type === 'restoreplan') {
+        restorePreview = { message: m.message || '', log: m.log || [] };
+      } else if (m.type === 'restoredone') {
+        restoreMessage = m.message || '';
+        restoreLog = m.log || [];
+        restorePhase = m.ok ? 'ok' : 'error';
+        // reloadFromDisk() already pushed the new list to every tab; say so, so
+        // nobody restarts the app expecting it to be necessary.
+        if (m.ok && m.reloaded) restoreMessage += ' Session list reloaded — no restart needed.';
+        else if (m.ok) restoreMessage += ' Restart the app to pick up the restored sessions.';
       } else if (m.type === 'syncallstart') {
         syncAllLog = '';
         syncAllMessage = '';
@@ -343,6 +432,24 @@
       </section>
 
       <section>
+        <div class="eyebrow">Backup &amp; restore</div>
+
+        <div class="field btn-row">
+          <button type="button" onclick={askBackup} disabled={backupPhase !== 'idle'}>
+            Create backup…
+          </button>
+          <button type="button" onclick={askRestore} disabled={restorePhase !== 'idle'}>
+            Restore from backup…
+          </button>
+        </div>
+        <div class="hint">
+          Copies the session list and each folder's Claude conversation history, so you can
+          move this setup to another machine. Restoring can remap the folder paths if your
+          projects live somewhere else there.
+        </div>
+      </section>
+
+      <section>
         <div class="eyebrow">App</div>
 
         <div class="field">
@@ -362,6 +469,109 @@
     </div>
   </div>
 </div>
+
+{#if backupPhase !== 'idle'}
+  <div class="overlay">
+    <div class="modal update-modal">
+      <h3>
+        {#if backupPhase === 'ok'}Backup complete
+        {:else if backupPhase === 'error'}Backup failed
+        {:else}Create backup{/if}
+      </h3>
+      <div class="form-body">
+        {#if backupPhase === 'confirm'}
+          <div class="field">
+            <label for="bk-dest">Destination folder (must be empty or not exist yet)</label>
+            <input id="bk-dest" type="text" bind:value={backupDest}
+                   placeholder="D:\claude-web-backup" />
+          </div>
+          <label class="check-row" for="bk-hist">
+            <input id="bk-hist" type="checkbox" bind:checked={backupIncludeHistory} />
+            Include conversation history{#if backupPlan}&nbsp; ({humanBytes(backupPlan.totalBytes)}){/if}
+          </label>
+          <div class="hint">
+            {#if backupPlan}
+              {backupPlan.sessionCount} sessions. Without history this is a few KB; with it,
+              {humanBytes(backupPlan.totalBytes)}.
+            {:else}
+              Measuring…
+            {/if}
+          </div>
+        {:else if backupPhase === 'running'}
+          <div class="update-status">
+            <span class="spin"><Icon name="refresh" size={14} /></span>
+            Copying — this can take a while for large histories…
+          </div>
+        {:else}
+          <div class="update-status" class:error={backupPhase === 'error'}>{backupMessage}</div>
+        {/if}
+      </div>
+      <div class="modal-actions">
+        {#if backupPhase === 'confirm'}
+          <button type="button" onclick={closeBackup}>Cancel</button>
+          <button type="button" class="primary" onclick={confirmBackup}>Create backup</button>
+        {:else if backupPhase !== 'running'}
+          <button type="button" onclick={closeBackup}>Close</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if restorePhase !== 'idle'}
+  <div class="overlay">
+    <div class="modal update-modal">
+      <h3>
+        {#if restorePhase === 'ok'}Restore complete
+        {:else if restorePhase === 'error'}Restore failed
+        {:else}Restore from backup{/if}
+      </h3>
+      <div class="form-body">
+        {#if restorePhase === 'confirm'}
+          <div class="field">
+            <label for="rs-src">Backup folder</label>
+            <input id="rs-src" type="text" bind:value={restoreSrc}
+                   placeholder="D:\claude-web-backup" />
+          </div>
+          <div class="hint">
+            If your projects sit somewhere else on this machine, map the old root to the new
+            one — otherwise the conversation history won't be found for those folders.
+          </div>
+          <div class="remap-row">
+            <input type="text" bind:value={restoreFrom} placeholder="old root, e.g. C:\Users\me\proj" />
+            <span class="arrow">→</span>
+            <input type="text" bind:value={restoreTo} placeholder="new root, e.g. /home/me/proj" />
+          </div>
+          {#if restorePreview}
+            <div class="update-status">{restorePreview.message}</div>
+            {#if restorePreview.log.length}
+              <pre class="update-log">{restorePreview.log.join('\n')}</pre>
+            {/if}
+          {/if}
+        {:else if restorePhase === 'running'}
+          <div class="update-status">
+            <span class="spin"><Icon name="refresh" size={14} /></span>
+            Restoring…
+          </div>
+        {:else}
+          <div class="update-status" class:error={restorePhase === 'error'}>{restoreMessage}</div>
+          {#if restoreLog.length}<pre class="update-log">{restoreLog.join('\n')}</pre>{/if}
+        {/if}
+      </div>
+      <div class="modal-actions">
+        {#if restorePhase === 'confirm'}
+          <button type="button" onclick={closeRestore}>Cancel</button>
+          <button type="button" onclick={previewRestore}>Preview</button>
+          <button type="button" class="primary" onclick={confirmRestore} disabled={!restorePreview}>
+            Restore
+          </button>
+        {:else if restorePhase !== 'running'}
+          <button type="button" onclick={closeRestore}>Close</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if updatePhase === 'confirm'}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -652,6 +862,31 @@
 
   .update-status.error {
     color: var(--danger);
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .remap-row {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .remap-row input {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+
+  .remap-row .arrow {
+    color: var(--muted, var(--text));
+    flex: 0 0 auto;
   }
 
   .update-warn {
