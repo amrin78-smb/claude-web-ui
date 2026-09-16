@@ -11,7 +11,9 @@
     "build": "vite build",
     "start": "node server/index.js",
     "check": "svelte-check --tsconfig ./web/tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "package": "node scripts/package.js",
+    "package:deb": "node scripts/package.js --target linux-x64 && node scripts/build-deb.js --stage dist-pkg/linux-x64 --out dist-pkg"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",

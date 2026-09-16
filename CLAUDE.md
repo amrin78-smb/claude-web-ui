@@ -119,6 +119,35 @@ There's no end-to-end browser test harness. Before committing a change:
    example of scripting create → stream → restart → close over the socket)
    rather than trusting types/build alone to prove a runtime behavior works.
 
+## Packaging (.exe / .deb)
+
+`scripts/package.js` stages a self-contained, runnable tree for one platform
+(`--target win32-x64|linux-x64|…`); both installers just wrap its output, so
+the layout can be built and run locally without either toolchain. What ships is
+`server/` (minus tests), `web/dist` and the four runtime deps — Vite/Svelte/
+Rollup are devDependencies that produce `web/dist` and never travel.
+
+Cross-building works because the one native dep, `@lydell/node-pty`, publishes
+per-platform prebuilds as optional deps: `npm install --os=linux --cpu=x64`
+fetches the Linux binding from Windows, so a Linux tree needs no compiler, no
+Docker and no WSL. The script fails loudly if the prebuild that landed doesn't
+match the target — otherwise the mistake only surfaces as a failed spawn on the
+user's machine.
+
+`scripts/build-deb.js` turns a staged Linux tree into a .deb. A .deb is an
+`ar` archive of `debian-binary` + `control.tar.gz` + `data.tar.gz`, in that
+order; the tarballs come from GNU tar (`--force-local`, because GNU tar
+otherwise reads `C:…` as `host:path`) and the ~40-line `ar` writer is here,
+so no dpkg-deb is needed. Installs to `/opt/claude-web-ui` with a
+`/usr/bin/claude-web-ui` wrapper and a systemd **user** service — user, not
+system, because the app runs as you and reads your `~/.claude`.
+
+`packaging/windows/claude-web-ui.iss` is the Inno Setup script. Per-user
+install (`PrivilegesRequired=lowest`) so there's no UAC prompt.
+
+`.github/workflows/release.yml` builds both on a v-tag and attaches them to a
+GitHub Release — which doubles as the update feed (see below).
+
 ## Self-update
 
 The Settings panel has an "Update app" action (confirm dialog -> streamed
