@@ -40,7 +40,14 @@ describe('listDir — subfolder listing', () => {
 });
 
 describe('listDir — __drives__', () => {
-  afterEach(() => vi.restoreAllMocks());
+  const realPlatform = process.platform;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // Object.defineProperty() isn't undone by restoreAllMocks(), so put the
+    // real platform back by hand — otherwise 'win32' leaks into later tests.
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+  });
 
   it('enumerates only existing drive letters on win32', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
@@ -54,8 +61,15 @@ describe('listDir — __drives__', () => {
   });
 
   it('the root of a drive reports its parent as __drives__', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    const result = listDir('C:\\', 'C:\\');
+    // The branch under test is `parent === abs`: a path that is its own parent,
+    // i.e. a filesystem root. listDir() uses the ambient `path` module, so that
+    // string is 'C:\' on Windows but '/' on Linux — overriding process.platform
+    // cannot change it, and a hard-coded 'C:\' just resolves against cwd and
+    // ENOENTs on the Linux CI runner. Derive the real root instead, and stub
+    // readdirSync so this never scans an actual drive root.
+    const root = path.parse(process.cwd()).root;
+    vi.spyOn(fs, 'readdirSync').mockReturnValue([]);
+    const result = listDir(root, root);
     expect(result.parent).toBe('__drives__');
   });
 });

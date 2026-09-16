@@ -20,6 +20,13 @@ const USAGE_PATH = require.resolve('./usage');
 const WAKELOCK_PATH = require.resolve('./wakeLock');
 const SESSION_MANAGER_PATH = require.resolve('./sessionManager');
 
+// title is derived with path.basename(), which is platform-specific: POSIX
+// basename() doesn't split on '\', so a hard-coded 'C:\\proj' yields the
+// whole string as the title on the Linux runner that builds the .deb in CI.
+// Resolving '/proj' gives a path that is native either way -- 'C:\\proj' on
+// Windows, '/proj' on Linux -- and basenames to 'proj' on both.
+const PROJ = require('path').resolve('/proj');
+
 function fakePty() {
   const handlers = {};
   return {
@@ -220,7 +227,7 @@ describe('SessionManager', () => {
       vi.useFakeTimers();
       const pty = fakePty();
       claude.spawnClaude.mockReturnValue(pty);
-      const wire = sessions.create('C:\\proj', 80, 24);
+      const wire = sessions.create(PROJ, 80, 24);
 
       expect(sessions.activeSessions()).toEqual({
         busy: [],
