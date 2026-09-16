@@ -1,5 +1,0 @@
-[   26116ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:4399/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:4399/assets/index-CQ2YQm4c.js:1
-[   29366ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:4399/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:4399/assets/index-CQ2YQm4c.js:1
-[   32611ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:4399/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:4399/assets/index-CQ2YQm4c.js:1
-[   35863ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:4399/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:4399/assets/index-CQ2YQm4c.js:1
-[   39125ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:4399/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:4399/assets/index-CQ2YQm4c.js:1

@@ -14,6 +14,9 @@ server.pid
 # Old packaged artifact, not source
 claude-web-ui.zip
 
+# Playwright MCP scratch output (snapshots/console logs from driving the UI)
+.playwright-mcp/
+
 # Claude Code local (per-user) settings — settings.json itself (if added) is shared
 .claude/settings.local.json
 
