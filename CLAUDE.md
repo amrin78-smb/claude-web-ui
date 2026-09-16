@@ -36,6 +36,18 @@ is for whoever (human or Claude) is editing the code.
     feature (clone into an empty folder, or `pull --ff-only`), streaming
     output. Also `gitDiff()` for the diff panel.
   - `fs.js` — folder browser (`listDir`), used by the folder picker UI.
+  - `backup.js` — backup/restore for moving to another machine. Two things
+    travel together and only one is ours: app state (`config.json`,
+    `sessions.json`) and the CLI's transcripts under
+    `~/.claude/projects/<slug>/`. Every path in both is absolute, and the slug
+    is *derived from* the folder's path, so a restore at a different path needs
+    remapping or the transcript is present but unreachable. `restoreBackup()`
+    rewrites the slug, the session/config paths, and the `cwd` field inside
+    each transcript record — and deliberately does **not** rewrite
+    `trackingPath` or paths embedded in conversation content, which are a
+    historical record of the old machine rather than something used to locate
+    anything. Restoring rewrites files the running `sessionManager` owns, so
+    it needs a restart to take effect; backing up is read-only and safe live.
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.
