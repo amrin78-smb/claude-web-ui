@@ -449,19 +449,53 @@ async function planBackup(opts = {}) {
 
 // ------------------------------------------------------------------- backup
 
-// Copy this machine's app state (and optionally each session's transcripts) to
-// `dest`, alongside a manifest describing where it all came from.
+// Where a backup actually lands, given what the user typed or picked.
 //
-// `dest` ending in .zip produces a single file — one thing to carry to the other
-// machine, and the transcripts are plain text so they compress hard. Anything
-// else produces the same layout as a folder tree. Both are built from one entry
-// list, so the two outputs can't drift apart.
+//   *.zip                 -> that exact file, which must not already exist
+//   an existing folder    -> a dated .zip INSIDE it
+//   a path that's not there yet -> taken at face value, written as a folder tree
+//
+// The middle case is the one that matters. A folder picker can only return
+// folders that already exist, and those almost always have something in them, so
+// requiring "empty or absent" rejected the most natural thing a person can do:
+// point at a folder and mean "put it in here". Refusing with "already exists and
+// is not empty" was accurate and useless — the user hasn't done anything wrong.
+// A dated name also can't collide with what's already in there.
+function resolveDest(dest) {
+  if (isZipPath(dest)) return { target: dest, asZip: true };
+
+  let stat = null;
+  try { stat = fs.statSync(dest); } catch { /* not there: fall through */ }
+  if (!stat || !stat.isDirectory()) return { target: dest, asZip: false };
+
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  // Local time, because this becomes a filename a person reads.
+  const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` +
+    `-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  let target = path.join(dest, `claude-web-backup-${stamp}.zip`);
+  for (let n = 2; fs.existsSync(target); n++) {
+    target = path.join(dest, `claude-web-backup-${stamp}-${n}.zip`);
+  }
+  return { target, asZip: true, inFolder: dest };
+}
+
+// Copy this machine's app state (and optionally each session's transcripts) to
+// `dest`, alongside a manifest describing where it all came from. See
+// resolveDest() for how `dest` is interpreted.
+//
+// A .zip is a single file — one thing to carry to the other machine, and the
+// transcripts are plain text so they compress hard. A folder tree holds the same
+// layout unpacked. Both are built from one entry list, so they can't drift apart.
 async function createBackup(dest, opts = {}) {
   const includeTranscripts = opts.includeTranscripts !== false;
   const appRoot = opts.appRoot || APP_ROOT;
   if (!dest) return { ok: false, message: 'No destination given.' };
 
-  const asZip = isZipPath(dest);
+  const resolved = resolveDest(dest);
+  const asZip = resolved.asZip;
+  dest = resolved.target;
+
   if (asZip) {
     if (fs.existsSync(dest)) return { ok: false, message: `${dest} already exists.` };
   } else if (fs.existsSync(dest) && fs.readdirSync(dest).length > 0) {
@@ -523,11 +557,16 @@ async function createBackup(dest, opts = {}) {
 
   return {
     ok: true,
+    // Always name the file. When the destination was a folder we chose the name,
+    // so "backed up successfully" without saying where is not much use.
     message: `Backed up ${plan.sessionCount} sessions and ${copied} project ` +
       `${copied === 1 ? 'history' : 'histories'}` +
-      (asZip ? ` into one file (${Math.max(1, Math.round(bytes / 1048576))} MB).` : '.'),
+      (asZip ? ` (${Math.max(1, Math.round(bytes / 1048576))} MB) to ${dest}` : ` to ${dest}`),
     manifest,
     zipped: asZip,
+    // The path actually written — may differ from what the caller passed, when a
+    // folder destination got a dated .zip inside it.
+    dest,
     // What actually landed on disk, so the UI can show the compressed size.
     bytes,
     totalBytes: rawBytes,
@@ -753,5 +792,5 @@ async function restoreFromDir(srcDir, opts = {}, unsafeEntries = []) {
 module.exports = {
   BACKUP_VERSION, SUPPORTED_VERSIONS, planBackup, createBackup, restoreBackup,
   remapPath, pathStartsWith, normalizeRules, projectSlug, rewriteTranscript,
-  gitInfo, commonRoot, isZipPath, safeEntryPath, walkFiles,
+  gitInfo, commonRoot, isZipPath, safeEntryPath, walkFiles, resolveDest,
 };

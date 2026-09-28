@@ -537,16 +537,17 @@
       <div class="form-body">
         {#if backupPhase === 'confirm'}
           <div class="field">
-            <label for="bk-dest">Destination — end it in .zip for a single file</label>
+            <label for="bk-dest">Destination — a folder to put it in, or a .zip to create</label>
             <!-- Not a D:\ example: on a machine with only C: that reads as a
                  suggestion and fails with a drive-not-found error. -->
             <input id="bk-dest" type="text" bind:value={backupDest}
                    placeholder="C:\Users\you\claude-web-backup.zip" />
           </div>
           <div class="hint">
-            A <code>.zip</code> is one file to carry across, and transcripts are plain text so
-            they compress hard. Any other path writes the same thing as a folder. Either form
-            restores.
+            Point at an existing folder and you get a dated <code>.zip</code> inside it — it
+            doesn't need to be empty. Name a <code>.zip</code> yourself to choose the filename,
+            or give a folder name that doesn't exist yet to write the backup unpacked as a tree.
+            Every form restores.
           </div>
           <label class="check-row" for="bk-hist">
             <input id="bk-hist" type="checkbox" bind:checked={backupIncludeHistory} />

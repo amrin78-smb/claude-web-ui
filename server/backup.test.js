@@ -211,13 +211,64 @@ describe('backup', () => {
       expect(back.log.join(' ')).toMatch(/did not overwrite/);
     });
 
-    it('refuses to write into a non-empty destination', async () => {
+    // This used to refuse with "already exists and is not empty". A folder picker
+    // can only return folders that exist, and those normally have things in them,
+    // so that rejected the most natural action available to the user — point at a
+    // folder and mean "put it in here". It now lands a dated .zip inside instead.
+    it('puts a dated .zip inside an existing folder, without needing it empty', async () => {
       seedSource();
-      const dest = path.join(tmpRoot, 'backup');
-      write(path.join(dest, 'something.txt'), 'x');
+      const dest = path.join(tmpRoot, 'somewhere');
+      write(path.join(dest, 'unrelated.txt'), 'x');
+
       const made = await backup.createBackup(dest, { appRoot });
-      expect(made.ok).toBe(false);
-      expect(made.message).toMatch(/not empty/);
+      expect(made.ok).toBe(true);
+      expect(made.zipped).toBe(true);
+      // Landed inside the folder they picked...
+      expect(path.dirname(made.dest)).toBe(dest);
+      expect(path.basename(made.dest)).toMatch(/^claude-web-backup-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/);
+      // ...alongside what was already there, not instead of it.
+      expect(fs.existsSync(path.join(dest, 'unrelated.txt'))).toBe(true);
+      // The message says where it went, since the name wasn't the user's choice.
+      expect(made.message).toContain(made.dest);
+
+      // And it is a real, restorable backup.
+      const back = await backup.restoreBackup(made.dest, { appRoot, dryRun: true });
+      expect(back.ok).toBe(true);
+    });
+
+    it('does not overwrite an earlier backup taken in the same minute', async () => {
+      seedSource();
+      const dest = path.join(tmpRoot, 'somewhere');
+      fs.mkdirSync(dest, { recursive: true });
+
+      const first = await backup.createBackup(dest, { appRoot });
+      const second = await backup.createBackup(dest, { appRoot });
+      expect(first.ok && second.ok).toBe(true);
+      expect(second.dest).not.toBe(first.dest);
+      expect(fs.existsSync(first.dest)).toBe(true);
+      expect(fs.existsSync(second.dest)).toBe(true);
+    });
+
+    it('still writes a folder tree when the destination does not exist yet', async () => {
+      seedSource();
+      const dest = path.join(tmpRoot, 'brand-new');
+      const made = await backup.createBackup(dest, { appRoot });
+      expect(made.ok).toBe(true);
+      expect(made.zipped).toBe(false);
+      expect(fs.statSync(dest).isDirectory()).toBe(true);
+      expect(fs.existsSync(path.join(dest, 'manifest.json'))).toBe(true);
+    });
+
+    it('interprets a destination by shape', () => {
+      const existing = path.join(tmpRoot, 'a-folder');
+      fs.mkdirSync(existing, { recursive: true });
+
+      expect(backup.resolveDest(path.join(tmpRoot, 'x.zip'))).toMatchObject({ asZip: true });
+      expect(backup.resolveDest(path.join(tmpRoot, 'x.ZIP'))).toMatchObject({ asZip: true });
+      // A folder that exists: zip inside it, and the folder is reported.
+      expect(backup.resolveDest(existing)).toMatchObject({ asZip: true, inFolder: existing });
+      // A path that isn't there: taken at face value, written as a tree.
+      expect(backup.resolveDest(path.join(tmpRoot, 'not-there'))).toMatchObject({ asZip: false });
     });
 
     it('can skip transcripts, and reports the size up front', async () => {

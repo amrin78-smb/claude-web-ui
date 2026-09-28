@@ -279,6 +279,9 @@ wss.on('connection', (ws) => {
           send({
             type: 'backupdone', ok: r.ok, message: r.message,
             totalBytes: r.totalBytes || 0, bytes: r.bytes || 0, zipped: !!r.zipped,
+            // May differ from what was requested: a folder destination gets a
+            // dated .zip inside it, so the UI has to be able to say where.
+            dest: r.dest || '',
           });
         } catch (err) {
           send({ type: 'backupdone', ok: false, message: err.message });

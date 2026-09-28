@@ -103,6 +103,16 @@ is for whoever (human or Claude) is editing the code.
     Archive entry names are treated as untrusted (`safeEntryPath` rejects `..`
     and absolute escapes): a backup arrives from another machine on removable
     media and is trivially editable, so "we wrote it" isn't a safety argument.
+
+    `resolveDest()` decides what a destination means: `*.zip` is that exact file,
+    an **existing folder** gets a dated `.zip` inside it, and a path that isn't
+    there yet is written as a folder tree. The middle case exists because the
+    original rule — empty or absent — rejected the most natural action a person
+    has: a folder picker can only return folders that exist, and those normally
+    have things in them, so "already exists and is not empty" fired on a correct
+    user action and left them stuck. Since the filename is then ours rather than
+    theirs, `createBackup()` returns `dest` and names it in the message; don't
+    reduce that to "backup complete".
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.
