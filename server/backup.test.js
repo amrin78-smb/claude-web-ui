@@ -222,7 +222,7 @@ describe('backup', () => {
 
     it('can skip transcripts, and reports the size up front', async () => {
       seedSource();
-      const plan = backup.planBackup({ appRoot });
+      const plan = await backup.planBackup({ appRoot });
       expect(plan.sessionCount).toBe(2);
       expect(plan.totalBytes).toBeGreaterThan(0);
 
@@ -566,7 +566,7 @@ describe('backup', () => {
   // planBackup surfaces what a clone-based restore would lose. It warns; it
   // never blocks, which is why this asserts on the report rather than an error.
   describe('at-risk reporting', () => {
-    it('lists uncommitted and unpushed work per repo', () => {
+    it('lists uncommitted and unpushed work per repo', async () => {
       const projA = path.join(tmpRoot, 'src', 'alpha');
       const projB = path.join(tmpRoot, 'src', 'beta');
       fs.mkdirSync(projA, { recursive: true });
@@ -576,7 +576,7 @@ describe('backup', () => {
         { id: 's2', cwd: projB, title: 'beta' },
       ]);
 
-      const plan = backup.planBackup({
+      const plan = await backup.planBackup({
         appRoot,
         gitInfo: (cwd) => cwd === projA
           ? { isRepo: true, url: 'u', branch: 'main', dirty: 3, unpushed: 2 }
@@ -590,12 +590,77 @@ describe('backup', () => {
       ]);
     });
 
-    it('does not flag a clean repo or a plain folder', () => {
+    // Regression: dirSize accumulated into a shared `total += (await stat).size`.
+    // That reads `total` before awaiting, so concurrent stats overwrite each
+    // other's additions — it reported 435 MB for a real 972 MB, differently each
+    // run. The size drives what the UI tells you a backup will cost, so it has to
+    // be exact and repeatable.
+    it('measures transcript size exactly, and the same way every time', async () => {
+      const proj = path.join(tmpRoot, 'src', 'alpha');
+      fs.mkdirSync(proj, { recursive: true });
+      write(path.join(appRoot, 'sessions.json'), [{ id: 's1', cwd: proj, title: 'alpha' }]);
+
+      // Enough files, nested, that the walk really does run concurrently.
+      const slug = backup.projectSlug(proj);
+      const base = path.join(fakeHome, '.claude', 'projects', slug);
+      let expected = 0;
+      for (let d = 0; d < 5; d++) {
+        for (let f = 0; f < 20; f++) {
+          const size = 100 + d * 20 + f;
+          write(path.join(base, 'sub' + d, `f${f}.jsonl`), 'x'.repeat(size));
+          expected += size;
+        }
+      }
+
+      const runs = [];
+      for (let i = 0; i < 3; i++) runs.push((await backup.planBackup({ appRoot })).totalBytes);
+
+      expect(runs[0]).toBe(expected);
+      expect(new Set(runs).size).toBe(1); // identical every run
+    });
+
+    // Regression: gitInfo used to be execFileSync, run one project after another.
+    // On 12 projects that was ~2.7s of blocked event loop every time the Backup
+    // dialog opened — and this server shares that loop with every session's PTY,
+    // so all terminal output froze. Inspection must happen concurrently.
+    it('inspects projects concurrently, not one after another', async () => {
+      const cwds = [];
+      for (let i = 0; i < 8; i++) {
+        const p = path.join(tmpRoot, 'src', 'p' + i);
+        fs.mkdirSync(p, { recursive: true });
+        cwds.push({ id: 's' + i, cwd: p, title: 'p' + i });
+      }
+      write(path.join(appRoot, 'sessions.json'), cwds);
+
+      const DELAY = 60;
+      let inFlight = 0;
+      let peak = 0;
+      const slowGitInfo = async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, DELAY));
+        inFlight--;
+        return { isRepo: true, url: 'u', branch: 'main', dirty: 0, unpushed: 0 };
+      };
+
+      const t0 = Date.now();
+      const plan = await backup.planBackup({ appRoot, gitInfo: slowGitInfo });
+      const elapsed = Date.now() - t0;
+
+      expect(plan.projects).toHaveLength(8);
+      // Several were in flight at once — not asserting "all 8", so a future
+      // concurrency cap stays allowed; what must not come back is one-at-a-time.
+      expect(peak).toBeGreaterThan(1);
+      // Sequentially this would be 8 * 60 = 480ms.
+      expect(elapsed).toBeLessThan(DELAY * 4);
+    });
+
+    it('does not flag a clean repo or a plain folder', async () => {
       const proj = path.join(tmpRoot, 'src', 'plain');
       fs.mkdirSync(proj, { recursive: true });
       write(path.join(appRoot, 'sessions.json'), [{ id: 's1', cwd: proj, title: 'plain' }]);
 
-      const plan = backup.planBackup({
+      const plan = await backup.planBackup({
         appRoot,
         gitInfo: () => ({ isRepo: false, url: '', branch: '', dirty: 0, unpushed: 0 }),
       });

@@ -28,14 +28,18 @@
  * warning before an update restart).
  */
 const fs = require('fs');
+const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const readline = require('readline');
 const { pipeline } = require('stream/promises');
-const { execFileSync } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const yazl = require('yazl');
 const yauzl = require('yauzl');
 const { claudeProjectDir } = require('./claude');
+
+const execFileP = promisify(execFile);
 
 const APP_ROOT = path.join(__dirname, '..');
 const BACKUP_VERSION = 2;
@@ -89,19 +93,28 @@ function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
-function dirSize(dir) {
-  let bytes = 0;
-  const walk = (d) => {
+// Async for the same reason gitInfo is: this walks every transcript file (2267
+// of them on a 12-project machine), and a synchronous version blocked the loop
+// every PTY shares for ~200ms. Entries within a directory are statted together,
+// which is also just faster.
+// Each level returns its own total rather than accumulating into a shared
+// variable. That is not a style preference: `total += (await stat(f)).size`
+// reads `total` BEFORE evaluating the right-hand side, so with concurrent
+// stats every suspended addition overwrites the ones that landed while it was
+// awaiting. It silently under-reports — 435 MB for a real 972 MB, and a
+// different wrong number each run.
+async function dirSize(dir) {
+  const walk = async (d) => {
     let entries;
-    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
+    try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return 0; }
+    const sizes = await Promise.all(entries.map(async (e) => {
       const full = path.join(d, e.name);
-      if (e.isDirectory()) walk(full);
-      else { try { bytes += fs.statSync(full).size; } catch {} }
-    }
+      if (e.isDirectory()) return walk(full);
+      try { return (await fsp.stat(full)).size; } catch { return 0; /* vanished mid-walk */ }
+    }));
+    return sizes.reduce((a, b) => a + b, 0);
   };
-  walk(dir);
-  return bytes;
+  return walk(dir);
 }
 
 // The slug Claude Code uses for a folder — the tail of claudeProjectDir().
@@ -245,18 +258,21 @@ async function openBackup(src) {
 
 // --------------------------------------------------------------------- git
 
-// Synchronous, because planBackup() is called from a ws handler that has to
-// answer in one message, and these are all local-only commands (no network).
-// Every one is best-effort: a folder that isn't a repo, or a git that isn't
-// installed, must degrade to "not a repo" rather than break the whole plan.
-function git(args, cwd) {
+// Async, and deliberately so. These are local-only commands, but there are
+// ~4 per project and this server is single-threaded with every session's PTY
+// sharing the event loop: an earlier sync version spent 2.7s of solid blocking
+// on 12 projects, which froze output in every terminal each time the Backup
+// dialog was opened. Best-effort as before — a folder that isn't a repo, or a
+// git that isn't installed, degrades to "not a repo" rather than breaking the
+// whole plan.
+async function git(args, cwd) {
   try {
-    return execFileSync('git', args, {
+    const { stdout } = await execFileP('git', args, {
       cwd,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    }).trim();
+    });
+    return String(stdout).trim();
   } catch {
     return null;
   }
@@ -268,11 +284,11 @@ function git(args, cwd) {
 // `unpushed` counts commits the upstream doesn't have. No upstream at all also
 // counts as unpushed — the branch exists only on this machine, so a clone can't
 // bring it back. Both counts are advisory; nothing here blocks a backup.
-function gitInfo(cwd) {
+async function gitInfo(cwd) {
   const none = { isRepo: false, url: '', branch: '', dirty: 0, unpushed: 0 };
   if (!cwd || !fs.existsSync(cwd)) return none;
 
-  const top = git(['rev-parse', '--show-toplevel'], cwd);
+  const top = await git(['rev-parse', '--show-toplevel'], cwd);
   if (!top) return none;
 
   // A session opened *inside* a repo (rather than at its root) can't be restored
@@ -283,25 +299,44 @@ function gitInfo(cwd) {
     String(b).replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
   if (!sameDir(top, cwd)) return { ...none, nestedIn: top };
 
-  const branch = git(['branch', '--show-current'], cwd) || '';
-  const dirty = (git(['status', '--porcelain'], cwd) || '')
-    .split('\n').filter((l) => l.trim()).length;
+  // `status --porcelain -b` carries the branch, its upstream AND the ahead count
+  // in its header line, on top of the dirty list — so one spawn answers what
+  // previously took four. Spawning is the expensive part here: with these calls
+  // fanned out across every project it was the only remaining source of
+  // event-loop stall, and subprocess creation is partly synchronous in the parent.
+  const [status, url] = await Promise.all([
+    git(['status', '--porcelain', '-b'], cwd),
+    git(['remote', 'get-url', 'origin'], cwd),
+  ]);
 
+  const lines = String(status || '').split('\n');
+  const header = (lines.find((l) => l.startsWith('## ')) || '').slice(3).trim();
+  const dirty = lines.filter((l) => l.trim() && !l.startsWith('## ')).length;
+
+  // "main...origin/main [ahead 2, behind 1]" | "main" | "HEAD (no branch)"
+  let branch = '';
+  let upstream = '';
   let unpushed = 0;
-  const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd);
-  if (!upstream) {
-    // No upstream: every commit on this branch is local-only as far as a clone
-    // is concerned. Count them, but cap the work with --max-count.
-    const n = git(['rev-list', '--count', '--max-count=999', 'HEAD'], cwd);
-    unpushed = n ? Number(n) || 0 : 0;
+  const tracked = header.match(/^(.+?)\.\.\.(\S+)(?:\s+\[(.+)\])?$/);
+  if (tracked) {
+    branch = tracked[1];
+    upstream = tracked[2];
+    const ahead = /ahead (\d+)/.exec(tracked[3] || '');
+    unpushed = ahead ? Number(ahead[1]) : 0;
   } else {
-    const n = git(['rev-list', '--count', upstream + '..HEAD'], cwd);
+    branch = header.replace(/\s*\(no branch\)$/, '').replace(/^No commits yet on\s+/, '');
+  }
+
+  // No upstream at all: every commit here is local-only as far as a clone is
+  // concerned. Only then is a second round trip needed.
+  if (!upstream) {
+    const n = await git(['rev-list', '--count', '--max-count=999', 'HEAD'], cwd);
     unpushed = n ? Number(n) || 0 : 0;
   }
 
   return {
     isRepo: true,
-    url: git(['remote', 'get-url', 'origin'], cwd) || '',
+    url: url || '',
     branch,
     dirty,
     unpushed,
@@ -341,30 +376,44 @@ function commonRoot(paths) {
 
 // What a backup WOULD contain, without writing anything. Lets the UI show the
 // size before someone copies several GB of transcripts onto a USB stick.
-function planBackup(opts = {}) {
+async function planBackup(opts = {}) {
   const appRoot = opts.appRoot || APP_ROOT;
   const inspect = opts.gitInfo || gitInfo; // injectable so tests need no real repos
   const sessions = readJson(path.join(appRoot, 'sessions.json'), []) || [];
-  const seen = new Map();
+
+  // Unique folders first, then inspect them all at once. Sequentially this was
+  // ~2.7s of blocked event loop on 12 projects; concurrently it costs about as
+  // much as the slowest single repo. `inspect` may be a sync test double, which
+  // Promise.all handles fine.
+  const cwds = [];
+  const seenCwd = new Set();
   for (const s of sessions) {
-    if (!s || !s.cwd || seen.has(s.cwd)) continue;
+    if (!s || !s.cwd || seenCwd.has(s.cwd)) continue;
+    seenCwd.add(s.cwd);
+    cwds.push(s);
+  }
+  const built = await Promise.all(cwds.map(async (s) => {
     const dir = claudeProjectDir(s.cwd);
     const exists = fs.existsSync(dir);
-    const g = inspect(s.cwd);
-    seen.set(s.cwd, {
+    const [g, bytes] = await Promise.all([
+      inspect(s.cwd),
+      exists ? dirSize(dir) : 0,
+    ]);
+    const info = g || {};
+    return {
       cwd: s.cwd,
       title: s.title || path.basename(s.cwd),
       slug: projectSlug(s.cwd),
       hasTranscripts: exists,
-      bytes: exists ? dirSize(dir) : 0,
+      bytes,
       // How a restore will recreate this folder: clone, or just mkdir.
-      repo: g.isRepo && g.url ? { url: g.url, branch: g.branch } : null,
-      dirty: g.dirty || 0,
-      unpushed: g.unpushed || 0,
-      noUpstream: !!g.noUpstream,
-    });
-  }
-  const projects = [...seen.values()];
+      repo: info.isRepo && info.url ? { url: info.url, branch: info.branch } : null,
+      dirty: info.dirty || 0,
+      unpushed: info.unpushed || 0,
+      noUpstream: !!info.noUpstream,
+    };
+  }));
+  const projects = built;
   // Work that a clone-based restore would NOT bring back. Advisory only.
   const atRisk = projects
     .filter((p) => p.repo && (p.dirty || p.unpushed))
@@ -402,7 +451,7 @@ async function createBackup(dest, opts = {}) {
     return { ok: false, message: `${dest} already exists and is not empty.` };
   }
 
-  const plan = planBackup(opts);
+  const plan = await planBackup(opts);
   const manifest = {
     version: BACKUP_VERSION,
     createdAt: new Date().toISOString(),

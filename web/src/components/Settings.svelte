@@ -63,6 +63,10 @@
   let updatePhase = $state<UpdatePhase>('idle');
   let updateLog = $state('');
   let updateMessage = $state('');
+  // Set when the server refused for lack of `force` — turns the failure panel
+  // into a second confirmation rather than a dead end.
+  let updateNeedsForce = $state(false);
+  let updateBusy = $state<{ id: string; title: string }[]>([]);
   let connStatus = $state<ConnStatus>('connecting');
   let awaitingReconnect = $state(false);
 
@@ -203,12 +207,27 @@
   function confirmUpdate() {
     updateLog = '';
     updateMessage = '';
+    updateNeedsForce = false;
+    updateBusy = [];
     awaitingReconnect = false;
     updatePhase = 'running';
     // `force` means "the user saw the busy warning and chose to go ahead". Sending
     // it only in that case lets the server catch a session that went busy while
-    // this dialog was open.
+    // this dialog was open. If the server disagrees with this view — it often
+    // does, since the app usually hosts the very session doing the updating — it
+    // answers with needsForce and the user re-confirms via forceUpdate().
     conn.send({ type: 'update', force: busySessions.length > 0 });
+  }
+
+  // "Yes, I've now seen exactly who is busy — do it anyway."
+  function forceUpdate() {
+    updateLog = '';
+    updateMessage = '';
+    updateNeedsForce = false;
+    updateBusy = [];
+    awaitingReconnect = false;
+    updatePhase = 'running';
+    conn.send({ type: 'update', force: true });
   }
 
   function closeUpdatePanel() {
@@ -242,6 +261,8 @@
         updateLog += m.data ?? '';
       } else if (m.type === 'updatedone') {
         updateMessage = m.message || '';
+        updateNeedsForce = !m.ok && !!m.needsForce;
+        updateBusy = m.busy || [];
         updatePhase = m.ok ? 'ok' : 'error';
       } else if (m.type === 'backupplan') {
         backupPlan = m.ok ? {
@@ -721,16 +742,27 @@
             <span class="spin"><Icon name="refresh" size={14} /></span>
             Update complete — restarting… {awaitingReconnect ? 'reconnecting…' : ''}
           </div>
+        {:else if updateNeedsForce}
+          <div class="update-status error">{updateMessage}</div>
+          {#if updateBusy.length}
+            <ul class="warn-list">
+              {#each updateBusy as s (s.id)}<li>{s.title}</li>{/each}
+            </ul>
+          {/if}
+          <p>Nothing was changed. You can wait for them to finish, or go ahead anyway.</p>
         {:else}
           <div class="update-status error">
             {updateMessage || 'Update failed.'} Nothing was restarted — this session is unaffected.
           </div>
         {/if}
-        <pre class="update-log">{updateLog || '…'}</pre>
+        {#if !updateNeedsForce}<pre class="update-log">{updateLog || '…'}</pre>{/if}
       </div>
       <div class="modal-actions">
         {#if updatePhase === 'error'}
           <button type="button" onclick={closeUpdatePanel}>Close</button>
+          {#if updateNeedsForce}
+            <button type="button" class="primary" onclick={forceUpdate}>Update anyway</button>
+          {/if}
         {/if}
       </div>
     </div>

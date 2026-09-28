@@ -249,7 +249,7 @@ wss.on('connection', (ws) => {
         // What a backup would contain, so the UI can show the size before
         // someone copies hundreds of megabytes onto a USB stick.
         try {
-          send({ type: 'backupplan', ok: true, ...planBackup() });
+          send({ type: 'backupplan', ok: true, ...(await planBackup()) });
         } catch (err) {
           send({ type: 'backupplan', ok: false, message: err.message });
         }
@@ -345,8 +345,16 @@ wss.on('connection', (ws) => {
             type: 'updatedone',
             ok: false,
             restarting: false,
-            message: `${names} started working while the confirmation was open. ` +
-              `Nothing was changed — try again once ${plural ? 'they are' : 'it is'} finished.`,
+            // Recoverable, not a dead end. The client decides `force` from its own
+            // view of who's busy, which it learns by broadcast — so it can disagree
+            // with this check, and in a session that IS the app being updated
+            // (the normal case for this app) that disagreement made the updater
+            // unusable: a refusal with no way forward. Hand back the busy list and
+            // a flag so the UI can re-confirm in one click.
+            needsForce: true,
+            busy: active.busy,
+            message: `${names} ${plural ? 'are' : 'is'} working right now. ` +
+              `Updating restarts the server and will cut ${plural ? 'them' : 'it'} off mid-turn.`,
           });
           break;
         }
