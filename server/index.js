@@ -97,6 +97,18 @@ const wss = new WebSocketServer({
   verifyClient: ({ origin }) => !origin || ALLOWED_ORIGINS.has(origin),
 });
 
+// Attaching to an existing server makes ws re-emit that server's 'error' here
+// too. Without a listener on this instance the duplicate is an unhandled 'error'
+// event, so the process dies instantly — before server.on('error') below can run
+// its EADDRINUSE retry. That retry is exactly what the self-update restart
+// depends on, which meant a restart raced against the outgoing process just
+// killed the incoming one and left nothing listening. The http server's handler
+// owns the decision; this only stops the copy from being fatal.
+wss.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') return; // server.on('error') retries
+  console.error('  websocket server error:', (err && err.message) || err);
+});
+
 // ---- WebSocket: each connection is a subscriber to sessionManager --------
 wss.on('connection', (ws) => {
   function send(obj) {
