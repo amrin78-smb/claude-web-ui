@@ -232,6 +232,19 @@ function isZipPath(p) {
   return /\.zip$/i.test(String(p || ''));
 }
 
+// Turn a filesystem error on the destination into something that says what to do.
+// The common case is a path on a drive this machine doesn't have — a bare
+// "ENOENT: mkdir 'D:\'" is technically accurate and tells the user nothing.
+function describeDestError(dest, err) {
+  const root = path.parse(path.resolve(dest)).root;
+  if (root && !fs.existsSync(root)) {
+    return `Can't write to ${dest} — drive ${root} doesn't exist on this machine.`;
+  }
+  if (err && err.code === 'EACCES') return `Can't write to ${dest} — permission denied.`;
+  if (err && err.code === 'ENOSPC') return `Can't write to ${dest} — the disk is full.`;
+  return `Can't write to ${dest} — ${(err && err.message) || err}`;
+}
+
 // Give restoreBackup() a directory to read, whether it was handed a folder or a
 // .zip. The caller must call cleanup() — it removes the temp extraction, if any.
 async function openBackup(src) {
@@ -270,6 +283,11 @@ async function git(args, cwd) {
     const { stdout } = await execFileP('git', args, {
       cwd,
       encoding: 'utf8',
+      // Node defaults windowsHide to false, so every one of these would flash a
+      // console window on Windows. Fanned out across a dozen projects that is a
+      // screenful of windows appearing and vanishing, and creating them costs
+      // far more than the git command itself.
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
     return String(stdout).trim();
@@ -446,9 +464,15 @@ async function createBackup(dest, opts = {}) {
   const asZip = isZipPath(dest);
   if (asZip) {
     if (fs.existsSync(dest)) return { ok: false, message: `${dest} already exists.` };
-    fs.mkdirSync(path.dirname(path.resolve(dest)), { recursive: true });
   } else if (fs.existsSync(dest) && fs.readdirSync(dest).length > 0) {
     return { ok: false, message: `${dest} already exists and is not empty.` };
+  }
+  // Create the destination up front so an unreachable one fails here, with an
+  // explanation, rather than as a bare ENOENT from somewhere deeper in the write.
+  try {
+    fs.mkdirSync(asZip ? path.dirname(path.resolve(dest)) : dest, { recursive: true });
+  } catch (err) {
+    return { ok: false, message: describeDestError(dest, err) };
   }
 
   const plan = await planBackup(opts);

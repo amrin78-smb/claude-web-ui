@@ -99,7 +99,7 @@ function runCmd(cmd, args, cwd, onData) {
     // 'error' event below is reported.
     let child;
     try {
-      child = spawn([cmd, ...args].join(' '), { cwd, shell: true });
+      child = spawn([cmd, ...args].join(' '), { cwd, shell: true, windowsHide: true });
     } catch (err) {
       onData(`${cmd} error: ${err.message}\n`);
       resolve({ code: -1 });

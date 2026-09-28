@@ -14,6 +14,9 @@ function runGit(args, cwd, onData) {
   return new Promise((resolve) => {
     const child = spawn('git', args, {
       cwd,
+      // Without this, Windows pops a console window per child. One is a flicker;
+      // a restore cloning a dozen projects is a screenful.
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
     child.stdout.on('data', d => onData(d.toString()));
@@ -126,7 +129,7 @@ async function syncAllRepos(workDir, repos, onData) {
 function collectGit(args, cwd) {
   return new Promise((resolve) => {
     let out = '';
-    const child = spawn('git', args, { cwd });
+    const child = spawn('git', args, { cwd, windowsHide: true });
     child.stdout.on('data', d => { out += d.toString(); });
     child.on('error', () => resolve(''));
     child.on('close', () => resolve(out));

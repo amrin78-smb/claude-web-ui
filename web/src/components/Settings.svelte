@@ -538,8 +538,10 @@
         {#if backupPhase === 'confirm'}
           <div class="field">
             <label for="bk-dest">Destination — end it in .zip for a single file</label>
+            <!-- Not a D:\ example: on a machine with only C: that reads as a
+                 suggestion and fails with a drive-not-found error. -->
             <input id="bk-dest" type="text" bind:value={backupDest}
-                   placeholder="D:\claude-web-backup.zip" />
+                   placeholder="C:\Users\you\claude-web-backup.zip" />
           </div>
           <div class="hint">
             A <code>.zip</code> is one file to carry across, and transcripts are plain text so
@@ -625,7 +627,7 @@
           <div class="field">
             <label for="rs-src">Backup — a .zip or the backup folder</label>
             <input id="rs-src" type="text" bind:value={restoreSrc}
-                   placeholder="D:\claude-web-backup.zip" />
+                   placeholder="C:\Users\you\claude-web-backup.zip" />
           </div>
           {#if !restoreAdvanced}
             <div class="field">

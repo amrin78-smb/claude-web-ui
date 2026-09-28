@@ -489,6 +489,23 @@ describe('backup', () => {
       expect(back.ok).toBe(true);
     });
 
+    // A destination on a drive that doesn't exist is the easy mistake to make,
+    // and "ENOENT: mkdir 'D:\'" tells the user nothing about what to do.
+    it('explains an unreachable destination instead of leaking ENOENT', async () => {
+      seedOne();
+      // Find a drive letter that genuinely isn't mounted, so this is meaningful
+      // rather than a hard-coded guess; skip on POSIX, where there are no drives.
+      const free = 'DEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+        .find((L) => !fs.existsSync(`${L}:${path.sep}`));
+      if (process.platform !== 'win32' || !free) return;
+
+      const r = await backup.createBackup(`${free}:${path.sep}bk.zip`, { appRoot });
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain(`drive ${free}:`);
+      expect(r.message).toContain("doesn't exist");
+      expect(r.message).not.toContain('ENOENT');
+    });
+
     it('refuses to overwrite an existing archive', async () => {
       seedOne();
       const dest = path.join(tmpRoot, 'bk.zip');
