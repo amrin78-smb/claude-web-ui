@@ -102,15 +102,24 @@
   let backupDest = $state('');
   let backupIncludeHistory = $state(true);
   let backupMessage = $state('');
-  let backupPlan = $state<{ sessionCount: number; totalBytes: number } | null>(null);
+  type AtRisk = { title: string; dirty: number; unpushed: number; noUpstream: boolean };
+  let backupPlan = $state<{
+    sessionCount: number; totalBytes: number;
+    repoCount: number; plainCount: number; commonRoot: string; atRisk: AtRisk[];
+  } | null>(null);
 
   type RestorePhase = 'idle' | 'confirm' | 'running' | 'ok' | 'error';
   let restorePhase = $state<RestorePhase>('idle');
   let restoreSrc = $state('');
+  // The simple path: one folder, and the old root is read from the backup.
+  let restoreWorkDir = $state('');
+  // Escape hatch for a v1 backup (no recorded root) or an unusual layout.
+  let restoreAdvanced = $state(false);
   let restoreFrom = $state('');
   let restoreTo = $state('');
   let restoreMessage = $state('');
   let restoreLog = $state<string[]>([]);
+  let restoreLiveLog = $state('');
   let restorePreview = $state<{ message: string; log: string[] } | null>(null);
 
   function humanBytes(n: number) {
@@ -124,9 +133,16 @@
   // The remap is only sent when both halves are filled in; a half-filled pair
   // would silently rewrite nothing and look like the feature is broken.
   function remapArg() {
+    if (!restoreAdvanced) return undefined;
     const from = restoreFrom.trim();
     const to = restoreTo.trim();
     return from && to ? { [from]: to } : undefined;
+  }
+
+  // In simple mode the server derives the remap from the backup's recorded root
+  // and clones every project into this folder. Mutually exclusive with remapArg.
+  function workDirArg() {
+    return restoreAdvanced ? undefined : (restoreWorkDir.trim() || undefined);
   }
 
   function askBackup() {
@@ -146,21 +162,31 @@
   function askRestore() {
     restoreMessage = '';
     restoreLog = [];
+    restoreLiveLog = '';
     restorePreview = null;
     restorePhase = 'confirm';
   }
 
   function previewRestore() {
     if (!restoreSrc.trim()) { toast('pick the backup folder'); return; }
+    if (!restoreAdvanced && !restoreWorkDir.trim()) { toast('pick the working folder'); return; }
     restorePreview = null;
-    conn.send({ type: 'restoreplan', src: restoreSrc.trim(), remap: remapArg() });
+    conn.send({
+      type: 'restoreplan', src: restoreSrc.trim(),
+      workDir: workDirArg(), remap: remapArg(),
+    });
   }
 
   function confirmRestore() {
     if (!restoreSrc.trim()) { toast('pick the backup folder'); return; }
+    if (!restoreAdvanced && !restoreWorkDir.trim()) { toast('pick the working folder'); return; }
     restoreMessage = '';
+    restoreLiveLog = '';
     restorePhase = 'running';
-    conn.send({ type: 'restore', src: restoreSrc.trim(), remap: remapArg() });
+    conn.send({
+      type: 'restore', src: restoreSrc.trim(),
+      workDir: workDirArg(), remap: remapArg(),
+    });
   }
 
   function closeBackup() { backupPhase = 'idle'; }
@@ -218,13 +244,22 @@
         updateMessage = m.message || '';
         updatePhase = m.ok ? 'ok' : 'error';
       } else if (m.type === 'backupplan') {
-        backupPlan = m.ok ? { sessionCount: m.sessionCount, totalBytes: m.totalBytes } : null;
+        backupPlan = m.ok ? {
+          sessionCount: m.sessionCount, totalBytes: m.totalBytes,
+          repoCount: m.repoCount ?? 0, plainCount: m.plainCount ?? 0,
+          commonRoot: m.commonRoot || '', atRisk: m.atRisk || [],
+        } : null;
         if (!m.ok) backupMessage = m.message || '';
       } else if (m.type === 'backupdone') {
         backupMessage = m.message || '';
         backupPhase = m.ok ? 'ok' : 'error';
       } else if (m.type === 'restoreplan') {
         restorePreview = { message: m.message || '', log: m.log || [] };
+      } else if (m.type === 'restorestart') {
+        restoreLiveLog = '';
+        restorePhase = 'running';
+      } else if (m.type === 'restorelog') {
+        restoreLiveLog += m.data ?? '';
       } else if (m.type === 'restoredone') {
         restoreMessage = m.message || '';
         restoreLog = m.log || [];
@@ -493,10 +528,43 @@
             {#if backupPlan}
               {backupPlan.sessionCount} sessions. Without history this is a few KB; with it,
               {humanBytes(backupPlan.totalBytes)}.
+              {#if backupPlan.repoCount}
+                Project folders aren't copied — {backupPlan.repoCount} git
+                {backupPlan.repoCount === 1 ? 'repo is' : 'repos are'} recorded and re-cloned on
+                restore{#if backupPlan.plainCount}, and {backupPlan.plainCount} plain
+                {backupPlan.plainCount === 1 ? 'folder is' : 'folders are'} recreated{/if}.
+              {/if}
             {:else}
               Measuring…
             {/if}
           </div>
+          {#if backupPlan && backupPlan.atRisk.length}
+            <p class="update-warn">
+              <strong>
+                {backupPlan.atRisk.length}
+                {backupPlan.atRisk.length === 1 ? 'repo has' : 'repos have'} work that a restore
+                will NOT bring back
+              </strong>
+            </p>
+            <ul class="warn-list">
+              {#each backupPlan.atRisk as r (r.title)}
+                <li>
+                  {r.title} —
+                  {#if r.dirty}{r.dirty} uncommitted {r.dirty === 1 ? 'file' : 'files'}{/if}
+                  {#if r.dirty && r.unpushed}, {/if}
+                  {#if r.unpushed}
+                    {r.unpushed} {r.unpushed === 1 ? 'commit' : 'commits'}
+                    {r.noUpstream ? 'on a branch with no remote' : 'not pushed'}
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+            <div class="hint">
+              Restore rebuilds these folders with <code>git clone</code>, so only pushed work
+              survives. Commit and push first if any of this matters — or back up anyway, the
+              conversation history is saved either way.
+            </div>
+          {/if}
         {:else if backupPhase === 'running'}
           <div class="update-status">
             <span class="spin"><Icon name="refresh" size={14} /></span>
@@ -533,15 +601,33 @@
             <input id="rs-src" type="text" bind:value={restoreSrc}
                    placeholder="D:\claude-web-backup" />
           </div>
-          <div class="hint">
-            If your projects sit somewhere else on this machine, map the old root to the new
-            one — otherwise the conversation history won't be found for those folders.
-          </div>
-          <div class="remap-row">
-            <input type="text" bind:value={restoreFrom} placeholder="old root, e.g. C:\Users\me\proj" />
-            <span class="arrow">→</span>
-            <input type="text" bind:value={restoreTo} placeholder="new root, e.g. /home/me/proj" />
-          </div>
+          {#if !restoreAdvanced}
+            <div class="field">
+              <label for="rs-workdir">Working folder on this machine</label>
+              <input id="rs-workdir" type="text" bind:value={restoreWorkDir}
+                     placeholder="/home/me  (or D:\Projects)" />
+            </div>
+            <div class="hint">
+              Everything goes here. The old root is read from the backup, each project is
+              cloned from its git remote (or the folder created, if it wasn't a repo), and the
+              conversation history is filed under the new paths. Requires that you're already
+              signed in to git and the Claude CLI.
+            </div>
+          {:else}
+            <div class="hint">
+              Map the old root to the new one yourself. Nothing is cloned — the folders have to
+              already be on this machine.
+            </div>
+            <div class="remap-row">
+              <input type="text" bind:value={restoreFrom} placeholder="old root, e.g. C:\Users\me\proj" />
+              <span class="arrow">→</span>
+              <input type="text" bind:value={restoreTo} placeholder="new root, e.g. /home/me/proj" />
+            </div>
+          {/if}
+          <button type="button" class="link-btn"
+                  onclick={() => { restoreAdvanced = !restoreAdvanced; restorePreview = null; }}>
+            {restoreAdvanced ? 'Use a single working folder instead' : 'I already have the folders — map roots manually'}
+          </button>
           {#if restorePreview}
             <div class="update-status">{restorePreview.message}</div>
             {#if restorePreview.log.length}
@@ -551,8 +637,9 @@
         {:else if restorePhase === 'running'}
           <div class="update-status">
             <span class="spin"><Icon name="refresh" size={14} /></span>
-            Restoring…
+            Restoring — cloning repos can take a while…
           </div>
+          {#if restoreLiveLog}<pre class="update-log">{restoreLiveLog}</pre>{/if}
         {:else}
           <div class="update-status" class:error={restorePhase === 'error'}>{restoreMessage}</div>
           {#if restoreLog.length}<pre class="update-log">{restoreLog.join('\n')}</pre>{/if}
@@ -887,6 +974,21 @@
   .remap-row .arrow {
     color: var(--muted, var(--text));
     flex: 0 0 auto;
+  }
+
+  /* A toggle that reads as prose, not a control — it switches the restore modal
+     between "one folder" and "map roots yourself" without competing with the
+     Cancel/Preview/Restore buttons below. */
+  .link-btn {
+    align-self: flex-start;
+    margin: 0 0 10px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent, var(--text));
+    font-size: 13px;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .update-warn {

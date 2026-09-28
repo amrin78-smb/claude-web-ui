@@ -54,6 +54,40 @@ is for whoever (human or Claude) is editing the code.
     `sessions.json` and broadcasts the new list to every tab. Without that
     reload the next `_persist()` would overwrite the restore with the stale
     in-memory list.
+
+    The project **folders** are not in the backup — they're git checkouts, and
+    cloning is cheaper than copying `node_modules` to a USB stick. So a v2
+    manifest records each project's `repo` (`{url, branch}`, or `null` for a
+    folder that isn't a checkout) plus the `commonRoot` every project path
+    shares. That's what makes the simple restore possible: the user names one
+    `workDir`, the remap is derived as `commonRoot -> workDir`, and
+    `restoreBackup()` *provisions* each folder first — `git clone` via the same
+    `syncRepo()` the Sync button uses, or `mkdir` for a non-repo — before
+    remapping anything. Cloning happens shallowest-path first, because
+    `syncRepo()` refuses to clone into a non-empty folder and a nested project
+    would otherwise block its own parent. Provisioning runs only for the
+    `workDir` flow; an explicit `remap` means the user is pointing at folders
+    they already have, so cloning over them isn't ours to do.
+
+    The consequence is that **only pushed work survives a restore**, so
+    `planBackup()` reports `atRisk`: per-repo `dirty`/`unpushed` counts (no
+    upstream at all counts as unpushed — a clone can't bring that branch back).
+    The UI warns and lets the user proceed, same posture as the busy-session
+    warning before an update restart; nothing here blocks a backup. Note the
+    session-dropping rule interacts with this: in a real run the filesystem is
+    the only check, so a clone that *failed* correctly leaves its session
+    dropped rather than pointing at a folder that was never created. Only
+    `dryRun` predicts, since it creates nothing — otherwise every preview would
+    report every session as skipped. `gitInfo` and `cloneOrPull` are injectable
+    so the tests need neither a real repo nor a network; `e2e` coverage against
+    real `git` with a local bare remote is the thing that actually proves the
+    clone path, since a mock can't.
+
+    A `workDir` restore takes minutes, so `index.js` streams progress as
+    `{type:'restorelog', data}` between `restorestart` and `restoredone`,
+    mirroring `update`. v1 backups are still readable (`SUPPORTED_VERSIONS`)
+    but have no recorded root or remotes, so they need the manual old→new
+    root pair — which the restore modal keeps behind a toggle.
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.

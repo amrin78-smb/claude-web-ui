@@ -245,4 +245,220 @@ describe('backup', () => {
       expect(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8')).toBe(before);
     });
   });
+
+  // commonRoot is what lets a restore ask for ONE folder instead of an old->new
+  // pair, so it has to hold for Windows strings on a POSIX host and vice versa.
+  describe('commonRoot', () => {
+    it('finds the deepest shared folder', () => {
+      expect(backup.commonRoot([
+        'C:\\Users\\me\\Documents',
+        'C:\\Users\\me\\Documents\\proj\\a',
+        'C:\\Users\\me\\Documents\\proj\\b',
+      ])).toBe('C:\\Users\\me\\Documents');
+    });
+
+    it('ignores case differences but keeps the first spelling', () => {
+      expect(backup.commonRoot([
+        'C:\\Users\\me\\NocVault\\a',
+        'C:\\Users\\me\\nocvault\\b',
+      ])).toBe('C:\\Users\\me\\NocVault');
+    });
+
+    it('handles POSIX paths', () => {
+      expect(backup.commonRoot(['/home/me/a', '/home/me/b/c'])).toBe('/home/me');
+    });
+
+    it('keeps a bare drive usable as a root', () => {
+      expect(backup.commonRoot(['C:\\a', 'C:\\b'])).toBe('C:\\');
+    });
+
+    it('is empty when there is nothing in common', () => {
+      expect(backup.commonRoot(['C:\\a', 'D:\\b'])).toBe('');
+      expect(backup.commonRoot([])).toBe('');
+    });
+  });
+
+  // The workDir flow: one folder in, and the restore provisions every project
+  // folder itself. cloneOrPull is injected so no network or real git is needed.
+  describe('workDir restore', () => {
+    function seedTwoProjects() {
+      const projA = path.join(tmpRoot, 'src', 'alpha');
+      const projB = path.join(tmpRoot, 'src', 'beta');
+      fs.mkdirSync(projA, { recursive: true });
+      fs.mkdirSync(projB, { recursive: true });
+      write(path.join(appRoot, 'sessions.json'), [
+        { id: 's1', cwd: projA, title: 'alpha' },
+        { id: 's2', cwd: projB, title: 'beta' },
+      ]);
+      const slugA = backup.projectSlug(projA);
+      write(path.join(fakeHome, '.claude', 'projects', slugA, 'conv.jsonl'),
+        JSON.stringify({ type: 'user', cwd: projA }) + '\n');
+      // alpha is a repo, beta is a plain folder — the two cases a restore has
+      // to handle differently (clone vs mkdir).
+      const gitInfo = (cwd) => cwd === projA
+        ? { isRepo: true, url: 'https://example.test/alpha.git', branch: 'main', dirty: 0, unpushed: 0 }
+        : { isRepo: false, url: '', branch: '', dirty: 0, unpushed: 0 };
+      return { projA, projB, slugA, gitInfo };
+    }
+
+    it('records each project\'s remote and the shared root in the manifest', () => {
+      const { gitInfo } = seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      const made = backup.createBackup(dest, { appRoot, gitInfo });
+      expect(made.ok).toBe(true);
+
+      const m = JSON.parse(fs.readFileSync(path.join(dest, 'manifest.json'), 'utf8'));
+      expect(m.version).toBe(2);
+      expect(m.commonRoot).toBe(path.join(tmpRoot, 'src'));
+      const byTitle = Object.fromEntries(m.projects.map((p) => [p.title, p]));
+      expect(byTitle.alpha.repo).toEqual({ url: 'https://example.test/alpha.git', branch: 'main' });
+      expect(byTitle.beta.repo).toBeNull();
+    });
+
+    it('clones repos, creates plain folders, and remaps everything to the new root', async () => {
+      const { projA, gitInfo } = seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      backup.createBackup(dest, { appRoot, gitInfo });
+
+      const workDir = path.join(tmpRoot, 'newmachine');
+      const cloned = [];
+      const back = await backup.restoreBackup(dest, {
+        appRoot,
+        workDir,
+        // Stand in for git: create the folder, like a real clone would.
+        cloneOrPull: async (destDir, repo) => {
+          cloned.push({ destDir, url: repo.url, branch: repo.branch });
+          fs.mkdirSync(destDir, { recursive: true });
+          return { ok: true, message: 'cloned' };
+        },
+      });
+
+      expect(back.ok).toBe(true);
+      expect(cloned).toEqual([{
+        destDir: path.join(workDir, 'alpha'),
+        url: 'https://example.test/alpha.git',
+        branch: 'main',
+      }]);
+
+      // Sessions point at the new root, and none were dropped.
+      const restored = JSON.parse(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8'));
+      expect(restored.map((s) => s.cwd).sort()).toEqual(
+        [path.join(workDir, 'alpha'), path.join(workDir, 'beta')].sort()
+      );
+      // The plain folder was created even though nothing cloned it.
+      expect(fs.existsSync(path.join(workDir, 'beta'))).toBe(true);
+
+      // History is filed under the NEW slug, with cwd rewritten inside.
+      const newSlug = backup.projectSlug(path.join(workDir, 'alpha'));
+      const conv = path.join(fakeHome, '.claude', 'projects', newSlug, 'conv.jsonl');
+      expect(fs.existsSync(conv)).toBe(true);
+      const rec = JSON.parse(fs.readFileSync(conv, 'utf8').trim());
+      expect(rec.cwd).toBe(path.join(workDir, 'alpha'));
+      expect(rec.cwd).not.toBe(projA);
+    });
+
+    it('counts folders it is about to create as present, so the preview is not all skips', async () => {
+      const { gitInfo } = seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      backup.createBackup(dest, { appRoot, gitInfo });
+
+      const back = await backup.restoreBackup(dest, {
+        appRoot, workDir: path.join(tmpRoot, 'nowhere-yet'), dryRun: true,
+      });
+      expect(back.ok).toBe(true);
+      expect(back.sessions).toHaveLength(2);
+      expect(back.message).toContain('0 skipped');
+      expect(back.log.join('\n')).toContain('would clone https://example.test/alpha.git');
+    });
+
+    it('reports a failed clone instead of pretending it worked', async () => {
+      const { gitInfo } = seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      backup.createBackup(dest, { appRoot, gitInfo });
+
+      const back = await backup.restoreBackup(dest, {
+        appRoot,
+        workDir: path.join(tmpRoot, 'newmachine'),
+        cloneOrPull: async () => ({ ok: false, message: 'clone failed' }),
+      });
+      expect(back.provisionFailed).toBe(1);
+      expect(back.log.join('\n')).toContain('FAILED — clone failed');
+      // alpha never got created, so its session is dropped rather than left
+      // pointing at a folder that isn't there.
+      const restored = JSON.parse(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8'));
+      expect(restored.map((s) => s.title)).toEqual(['beta']);
+    });
+
+    it('refuses a workDir restore of a backup that recorded no root', async () => {
+      seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      backup.createBackup(dest, { appRoot });
+      // Simulate a v1 backup: supported for reading, but nothing to derive from.
+      const mp = path.join(dest, 'manifest.json');
+      const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
+      delete m.commonRoot;
+      m.version = 1;
+      fs.writeFileSync(mp, JSON.stringify(m));
+
+      const back = await backup.restoreBackup(dest, { appRoot, workDir: path.join(tmpRoot, 'x') });
+      expect(back.ok).toBe(false);
+      expect(back.message).toContain('does not record a root folder');
+    });
+
+    it('still reads a v1 backup with an explicit remap', async () => {
+      const { projA } = seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      backup.createBackup(dest, { appRoot });
+      const mp = path.join(dest, 'manifest.json');
+      const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
+      m.version = 1;
+      fs.writeFileSync(mp, JSON.stringify(m));
+
+      const back = await backup.restoreBackup(dest, { appRoot });
+      expect(back.ok).toBe(true);
+      const restored = JSON.parse(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8'));
+      expect(restored.map((s) => s.cwd)).toContain(projA);
+    });
+  });
+
+  // planBackup surfaces what a clone-based restore would lose. It warns; it
+  // never blocks, which is why this asserts on the report rather than an error.
+  describe('at-risk reporting', () => {
+    it('lists uncommitted and unpushed work per repo', () => {
+      const projA = path.join(tmpRoot, 'src', 'alpha');
+      const projB = path.join(tmpRoot, 'src', 'beta');
+      fs.mkdirSync(projA, { recursive: true });
+      fs.mkdirSync(projB, { recursive: true });
+      write(path.join(appRoot, 'sessions.json'), [
+        { id: 's1', cwd: projA, title: 'alpha' },
+        { id: 's2', cwd: projB, title: 'beta' },
+      ]);
+
+      const plan = backup.planBackup({
+        appRoot,
+        gitInfo: (cwd) => cwd === projA
+          ? { isRepo: true, url: 'u', branch: 'main', dirty: 3, unpushed: 2 }
+          : { isRepo: true, url: 'u2', branch: 'main', dirty: 0, unpushed: 0 },
+      });
+
+      expect(plan.repoCount).toBe(2);
+      expect(plan.plainCount).toBe(0);
+      expect(plan.atRisk).toEqual([
+        { title: 'alpha', cwd: projA, dirty: 3, unpushed: 2, noUpstream: false },
+      ]);
+    });
+
+    it('does not flag a clean repo or a plain folder', () => {
+      const proj = path.join(tmpRoot, 'src', 'plain');
+      fs.mkdirSync(proj, { recursive: true });
+      write(path.join(appRoot, 'sessions.json'), [{ id: 's1', cwd: proj, title: 'plain' }]);
+
+      const plan = backup.planBackup({
+        appRoot,
+        gitInfo: () => ({ isRepo: false, url: '', branch: '', dirty: 0, unpushed: 0 }),
+      });
+      expect(plan.atRisk).toEqual([]);
+      expect(plan.plainCount).toBe(1);
+    });
+  });
 });

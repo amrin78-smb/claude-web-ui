@@ -270,10 +270,12 @@ wss.on('connection', (ws) => {
       }
 
       case 'restoreplan': {
-        // Dry run: says what would land where, and which sessions would be
-        // dropped because their folder isn't on this machine.
+        // Dry run: says what would land where, what it would clone, and which
+        // sessions would be dropped because their folder isn't on this machine.
         try {
-          const r = await restoreBackup(msg.src, { remap: msg.remap, dryRun: true });
+          const r = await restoreBackup(msg.src, {
+            workDir: msg.workDir, remap: msg.remap, dryRun: true,
+          });
           send({ type: 'restoreplan', ...r });
         } catch (err) {
           send({ type: 'restoreplan', ok: false, message: err.message });
@@ -300,7 +302,13 @@ wss.on('connection', (ws) => {
         }
         send({ type: 'restorestart' });
         try {
-          const r = await restoreBackup(msg.src, { remap: msg.remap });
+          // A workDir restore clones every project, which takes minutes — stream
+          // progress the same way `update` does rather than leaving the UI blank.
+          const r = await restoreBackup(msg.src, {
+            workDir: msg.workDir,
+            remap: msg.remap,
+            onLog: (data) => send({ type: 'restorelog', data }),
+          });
           let reloaded = false;
           if (r.ok) {
             const rl = sessions.reloadFromDisk();
