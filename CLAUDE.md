@@ -173,8 +173,10 @@ There's no end-to-end browser test harness. Before committing a change:
 `scripts/package.js` stages a self-contained, runnable tree for one platform
 (`--target win32-x64|linux-x64|…`); both installers just wrap its output, so
 the layout can be built and run locally without either toolchain. What ships is
-`server/` (minus tests), `web/dist` and the four runtime deps — Vite/Svelte/
-Rollup are devDependencies that produce `web/dist` and never travel.
+`server/` (minus tests), `web/dist` and whatever is in package.json
+`dependencies` — copied verbatim, so a new runtime dep needs no change in
+`package.js`. Vite/Svelte/Rollup are devDependencies that produce `web/dist`
+and never travel.
 
 Cross-building works because the one native dep, `@lydell/node-pty`, publishes
 per-platform prebuilds as optional deps: `npm install --os=linux --cpu=x64`
@@ -223,6 +225,27 @@ spawns a new detached process running the same entrypoint, then calls the
 existing `shutdown()`. Because the new process may race the old one for port
 4280, `index.js` retries `server.listen()` on `EADDRINUSE` a few times before
 giving up — expected, not exceptional, given how the restart works.
+
+**That retry silently didn't work for a long time.** Attaching a
+`WebSocketServer` to an existing http server makes `ws` re-emit that server's
+`'error'` on the `WebSocketServer` too. With no listener there the duplicate is
+an unhandled `'error'` event, so the process died instantly and the retry never
+ran — every restart was a coin flip on whether the outgoing server had already
+released the port, and when it hadn't the app came back *down*. Hence
+`wss.on('error')` in `index.js`, which exists purely to make the copy non-fatal
+and leave the decision to `server.on('error')`. Don't remove it. The budget is
+20 × 250ms = **5 seconds total**, so anything automating a restart has to stop
+the old process promptly after spawning the replacement, or the replacement
+gives up and you are left with nothing listening.
+
+**Windows gotcha for any child process:** Node defaults `windowsHide` to
+`false`, so every `spawn`/`execFile` pops a console window. One is a flicker;
+`planBackup()` fanning ~3 git calls across a dozen projects is a screenful, and
+creating the windows costs far more than the commands. Every git spawn here sets
+`windowsHide: true` (`backup.js`, `git.js`'s `runGit` and `collectGit`,
+`update.js`'s shelled npm) — match that in anything new. Note this can't be
+caught by measuring from a test harness: node attached to a console creates no
+windows either way, so it only shows up when the server runs windowless.
 
 Restarting drops every live PTY (sessions come back as resumable "stopped"
 ghosts, same as any server restart — no Claude conversation history is lost,
