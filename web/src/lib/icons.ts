@@ -5,6 +5,8 @@
 export const ICONS: Record<string, string> = {
   folder: '<path d="M3 6.2A2.2 2.2 0 0 1 5.2 4h3.6l2 2H19a2.2 2.2 0 0 1 2.2 2.2v9.6A2.2 2.2 0 0 1 19 20H5.2A2.2 2.2 0 0 1 3 17.8V6.2z"/>',
   'arrow-up': '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+  // Sits next to `folder` in the path picker's listing, so it matches its weight.
+  file: '<path d="M14 3H7.2A2.2 2.2 0 0 0 5 5.2v13.6A2.2 2.2 0 0 0 7.2 21h9.6a2.2 2.2 0 0 0 2.2-2.2V8l-5-5z"/><path d="M14 3v5h5"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2.2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16.5l-5.2-5.2-4 4-3-3L3 17.5"/>',
   paperclip: '<path d="M17.3 7.4l-8.1 8.1a2.9 2.9 0 1 0 4.1 4.1l7.6-7.6a5.1 5.1 0 1 0-7.2-7.2l-7.6 7.6a7.3 7.3 0 1 0 10.3 10.3"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.2 5.7"/><path d="M20 5.2V11h-5.8"/>',

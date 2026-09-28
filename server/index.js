@@ -56,7 +56,12 @@ if (fs.existsSync(distDir)) {
 // List drives + immediate subfolders for the folder browser.
 app.get('/api/dirs', (req, res) => {
   try {
-    res.json(listDir(req.query.path, defaultCwd()));
+    // `fileExt` lets the picker also list matching files (e.g. '.zip' when
+    // choosing a backup archive). Constrained to a short, dot-prefixed
+    // extension: it reaches a filesystem listing, so don't accept a pattern.
+    const raw = String(req.query.fileExt || '');
+    const fileExt = /^\.[a-z0-9]{1,8}$/i.test(raw) ? raw : '';
+    res.json(listDir(req.query.path, defaultCwd(), { fileExt }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

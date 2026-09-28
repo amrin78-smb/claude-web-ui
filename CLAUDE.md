@@ -35,7 +35,12 @@ is for whoever (human or Claude) is editing the code.
   - `git.js` — shells out to `git` for the per-session "Sync from GitHub"
     feature (clone into an empty folder, or `pull --ff-only`), streaming
     output. Also `gitDiff()` for the diff panel.
-  - `fs.js` — folder browser (`listDir`), used by the folder picker UI.
+  - `fs.js` — folder browser (`listDir`), used by the picker UIs. `opts.fileExt`
+    (e.g. `.zip`) additionally lists matching *files*, which is what lets the
+    backup/restore fields offer an archive and not just a folder; `files` is
+    always present, empty when nothing was asked for, so callers never guard on
+    it. `/api/dirs` only forwards a short dot-prefixed extension — it reaches a
+    filesystem listing, so it takes an extension, never a pattern.
   - `backup.js` — backup/restore for moving to another machine. Two things
     travel together and only one is ours: app state (`config.json`,
     `sessions.json`) and the CLI's transcripts under
@@ -122,7 +127,18 @@ is for whoever (human or Claude) is editing the code.
     fed by `connection.ts`.
   - `src/components/` — `Terminal.svelte` (xterm.js), `Sidebar.svelte`,
     `Tabs.svelte`, `TopBar.svelte`, `Settings.svelte`, `CommandPalette.svelte`
-    (⌘K), `FolderPicker.svelte`, `DiffPanel.svelte`, `Toasts.svelte`.
+    (⌘K), `FolderPicker.svelte`, `PathPicker.svelte`, `DiffPanel.svelte`,
+    `Toasts.svelte`.
+
+    Two pickers, deliberately: `FolderPicker` *is* the session working-folder
+    flow — wired to the `showFolderPicker` store and calling
+    `createSession`/`setSessionCwd` itself — while `PathPicker` is prop-driven
+    and just hands a path back to whoever opened it. Settings needs the latter
+    because one panel has three destinations (backup target, restore source,
+    restore working folder) and none of them touch sessions. `mode` is
+    `folder` | `file` | `either`, and a typed path always beats the browsed one
+    so you can name somewhere that doesn't exist yet — which the restore working
+    folder relies on.
   - `npm run build` emits `web/dist`, which `server/index.js` serves statically
     in production. In dev, Vite serves the UI directly and proxies `/api`+`/ws`.
 

@@ -39,6 +39,50 @@ describe('listDir — subfolder listing', () => {
   });
 });
 
+// The path picker also has to offer a backup archive, not just folders, so
+// listDir can be asked for matching files. `files` is always present so no
+// caller has to guard on it.
+describe('listDir — files', () => {
+  let root;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-web-ui-files-test-'));
+    fs.mkdirSync(path.join(root, 'sub'));
+    fs.writeFileSync(path.join(root, 'b-backup.zip'), 'x'.repeat(2048));
+    fs.writeFileSync(path.join(root, 'a-backup.ZIP'), 'x'.repeat(10));
+    fs.writeFileSync(path.join(root, 'notes.txt'), 'hi');
+  });
+
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('lists no files unless an extension is asked for', () => {
+    expect(listDir(root, root).files).toEqual([]);
+  });
+
+  it('lists only matching files, sorted, with their size', () => {
+    const r = listDir(root, root, { fileExt: '.zip' });
+    expect(r.files.map((f) => f.name)).toEqual(['a-backup.ZIP', 'b-backup.zip']);
+    expect(r.files[1].bytes).toBe(2048);
+    expect(r.files[1].path).toBe(path.join(path.resolve(root), 'b-backup.zip'));
+  });
+
+  it('matches the extension case-insensitively, as the filesystem does', () => {
+    // 'a-backup.ZIP' only shows up if '.zip' is compared case-insensitively.
+    const names = listDir(root, root, { fileExt: '.ZIP' }).files.map((f) => f.name);
+    expect(names).toContain('a-backup.ZIP');
+    expect(names).toContain('b-backup.zip');
+  });
+
+  it('still lists folders alongside the files', () => {
+    const r = listDir(root, root, { fileExt: '.zip' });
+    expect(r.dirs.map((d) => d.name)).toEqual(['sub']);
+  });
+
+  it('never reports files for the drive list', () => {
+    expect(listDir('__drives__', root, { fileExt: '.zip' }).files).toEqual([]);
+  });
+});
+
 describe('listDir — __drives__', () => {
   const realPlatform = process.platform;
 

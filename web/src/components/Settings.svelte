@@ -7,6 +7,7 @@
   import { conn, type ConnStatus } from '../lib/connection';
   import { sessions } from '../stores/sessions';
   import Icon from './Icon.svelte';
+  import PathPicker from './PathPicker.svelte';
 
   // Initialize local form state from the current config snapshot.
   let repoUrl = $state($config.repoUrl);
@@ -195,6 +196,48 @@
 
   function closeBackup() { backupPhase = 'idle'; }
   function closeRestore() { restorePhase = 'idle'; }
+
+  // ---- path picker ----
+  // One dialog serves all three fields; `picker` says which one asked, so the
+  // chosen path goes back to the right place.
+  type PickerKind = null | 'backupDest' | 'restoreSrc' | 'restoreWorkDir';
+  let picker = $state<PickerKind>(null);
+
+  const pickerConfig = {
+    backupDest: {
+      title: 'Where to save the backup',
+      mode: 'folder' as const,
+      fileExt: '',
+      hint: 'Pick a folder and a dated .zip is written inside it. Type a path ending in .zip to name the file yourself.',
+    },
+    restoreSrc: {
+      title: 'Choose the backup to restore',
+      mode: 'either' as const,
+      fileExt: '.zip',
+      hint: 'Pick a .zip, or open the folder a backup was written to and use that.',
+    },
+    restoreWorkDir: {
+      title: 'Working folder on this machine',
+      mode: 'folder' as const,
+      fileExt: '',
+      hint: "Projects are recreated under here. It doesn't have to exist yet — type a path if you want a new one.",
+    },
+  };
+
+  // Start browsing from whatever's already typed, so reopening the dialog doesn't
+  // lose your place.
+  function pickerStart(kind: Exclude<PickerKind, null>) {
+    if (kind === 'backupDest') return backupDest.trim();
+    if (kind === 'restoreSrc') return restoreSrc.trim();
+    return restoreWorkDir.trim();
+  }
+
+  function onPicked(p: string) {
+    if (picker === 'backupDest') backupDest = p;
+    else if (picker === 'restoreSrc') { restoreSrc = p; restorePreview = null; }
+    else if (picker === 'restoreWorkDir') { restoreWorkDir = p; restorePreview = null; }
+    picker = null;
+  }
 
   function cancelUpdate() {
     updatePhase = 'idle';
@@ -540,8 +583,13 @@
             <label for="bk-dest">Destination — a folder to put it in, or a .zip to create</label>
             <!-- Not a D:\ example: on a machine with only C: that reads as a
                  suggestion and fails with a drive-not-found error. -->
-            <input id="bk-dest" type="text" bind:value={backupDest}
-                   placeholder="C:\Users\you\claude-web-backup.zip" />
+            <div class="path-row">
+              <input id="bk-dest" type="text" bind:value={backupDest}
+                     placeholder="C:\Users\you\claude-web-backup.zip" />
+              <button type="button" onclick={() => (picker = 'backupDest')}>
+                <Icon name="folder" size={14} /> Browse
+              </button>
+            </div>
           </div>
           <div class="hint">
             Point at an existing folder and you get a dated <code>.zip</code> inside it — it
@@ -627,14 +675,24 @@
         {#if restorePhase === 'confirm'}
           <div class="field">
             <label for="rs-src">Backup — a .zip or the backup folder</label>
-            <input id="rs-src" type="text" bind:value={restoreSrc}
-                   placeholder="C:\Users\you\claude-web-backup.zip" />
+            <div class="path-row">
+              <input id="rs-src" type="text" bind:value={restoreSrc}
+                     placeholder="C:\Users\you\claude-web-backup.zip" />
+              <button type="button" onclick={() => (picker = 'restoreSrc')}>
+                <Icon name="folder" size={14} /> Browse
+              </button>
+            </div>
           </div>
           {#if !restoreAdvanced}
             <div class="field">
               <label for="rs-workdir">Working folder on this machine</label>
-              <input id="rs-workdir" type="text" bind:value={restoreWorkDir}
-                     placeholder="/home/me  (or D:\Projects)" />
+              <div class="path-row">
+                <input id="rs-workdir" type="text" bind:value={restoreWorkDir}
+                       placeholder="/home/me  (or D:\Projects)" />
+                <button type="button" onclick={() => (picker = 'restoreWorkDir')}>
+                  <Icon name="folder" size={14} /> Browse
+                </button>
+              </div>
             </div>
             <div class="hint">
               Everything goes here. The old root is read from the backup, each project is
@@ -770,6 +828,19 @@
       </div>
     </div>
   </div>
+{/if}
+
+<!-- Rendered above the backup/restore modals so it stacks over them. -->
+{#if picker}
+  <PathPicker
+    title={pickerConfig[picker].title}
+    mode={pickerConfig[picker].mode}
+    fileExt={pickerConfig[picker].fileExt}
+    hint={pickerConfig[picker].hint}
+    start={pickerStart(picker)}
+    onpick={onPicked}
+    oncancel={() => (picker = null)}
+  />
 {/if}
 
 {#if syncAllPhase === 'running' || syncAllPhase === 'ok' || syncAllPhase === 'error'}
@@ -995,6 +1066,25 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  /* Text field plus its Browse button. The input keeps shrinking so a long
+     path never pushes the button off the row. */
+  .path-row {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+  }
+  .path-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .path-row button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .remap-row {
