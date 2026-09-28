@@ -516,9 +516,14 @@
       <div class="form-body">
         {#if backupPhase === 'confirm'}
           <div class="field">
-            <label for="bk-dest">Destination folder (must be empty or not exist yet)</label>
+            <label for="bk-dest">Destination — end it in .zip for a single file</label>
             <input id="bk-dest" type="text" bind:value={backupDest}
-                   placeholder="D:\claude-web-backup" />
+                   placeholder="D:\claude-web-backup.zip" />
+          </div>
+          <div class="hint">
+            A <code>.zip</code> is one file to carry across, and transcripts are plain text so
+            they compress hard. Any other path writes the same thing as a folder. Either form
+            restores.
           </div>
           <label class="check-row" for="bk-hist">
             <input id="bk-hist" type="checkbox" bind:checked={backupIncludeHistory} />
@@ -597,9 +602,9 @@
       <div class="form-body">
         {#if restorePhase === 'confirm'}
           <div class="field">
-            <label for="rs-src">Backup folder</label>
+            <label for="rs-src">Backup — a .zip or the backup folder</label>
             <input id="rs-src" type="text" bind:value={restoreSrc}
-                   placeholder="D:\claude-web-backup" />
+                   placeholder="D:\claude-web-backup.zip" />
           </div>
           {#if !restoreAdvanced}
             <div class="field">

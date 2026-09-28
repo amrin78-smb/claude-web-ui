@@ -117,7 +117,7 @@ describe('backup', () => {
       const { projA, slugA } = seedSource();
       const dest = path.join(tmpRoot, 'backup');
 
-      const made = backup.createBackup(dest, { appRoot });
+      const made = await backup.createBackup(dest, { appRoot });
       expect(made.ok).toBe(true);
       expect(fs.existsSync(path.join(dest, 'manifest.json'))).toBe(true);
       expect(fs.existsSync(path.join(dest, 'app', 'sessions.json'))).toBe(true);
@@ -138,7 +138,7 @@ describe('backup', () => {
     it('remaps paths, slugs and transcript cwd when the folder moves', async () => {
       const { projA, slugA } = seedSource();
       const dest = path.join(tmpRoot, 'backup');
-      expect(backup.createBackup(dest, { appRoot }).ok).toBe(true);
+      expect((await backup.createBackup(dest, { appRoot })).ok).toBe(true);
 
       // The "new machine": same projects at a different root, which must exist
       // or the session is skipped as unreachable.
@@ -184,7 +184,7 @@ describe('backup', () => {
     it('skips sessions whose folder does not exist on this machine', async () => {
       seedSource();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot });
+      await backup.createBackup(dest, { appRoot });
 
       const back = await backup.restoreBackup(dest, {
         appRoot,
@@ -199,7 +199,7 @@ describe('backup', () => {
     it('never overwrites history that already exists on the target', async () => {
       const { projA, slugA } = seedSource();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot });
+      await backup.createBackup(dest, { appRoot });
 
       // Existing conversation on the target machine.
       write(path.join(fakeHome, '.claude', 'projects', slugA, 'conv.jsonl'), 'PRECIOUS\n');
@@ -211,23 +211,23 @@ describe('backup', () => {
       expect(back.log.join(' ')).toMatch(/did not overwrite/);
     });
 
-    it('refuses to write into a non-empty destination', () => {
+    it('refuses to write into a non-empty destination', async () => {
       seedSource();
       const dest = path.join(tmpRoot, 'backup');
       write(path.join(dest, 'something.txt'), 'x');
-      const made = backup.createBackup(dest, { appRoot });
+      const made = await backup.createBackup(dest, { appRoot });
       expect(made.ok).toBe(false);
       expect(made.message).toMatch(/not empty/);
     });
 
-    it('can skip transcripts, and reports the size up front', () => {
+    it('can skip transcripts, and reports the size up front', async () => {
       seedSource();
       const plan = backup.planBackup({ appRoot });
       expect(plan.sessionCount).toBe(2);
       expect(plan.totalBytes).toBeGreaterThan(0);
 
       const dest = path.join(tmpRoot, 'backup-light');
-      const made = backup.createBackup(dest, { appRoot, includeTranscripts: false });
+      const made = await backup.createBackup(dest, { appRoot, includeTranscripts: false });
       expect(made.ok).toBe(true);
       expect(fs.existsSync(path.join(dest, 'projects'))).toBe(false);
       expect(fs.existsSync(path.join(dest, 'app', 'sessions.json'))).toBe(true);
@@ -236,7 +236,7 @@ describe('backup', () => {
     it('dryRun reports what would happen without writing', async () => {
       seedSource();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot });
+      await backup.createBackup(dest, { appRoot });
       const before = fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8');
 
       const back = await backup.restoreBackup(dest, { appRoot, dryRun: true });
@@ -301,10 +301,10 @@ describe('backup', () => {
       return { projA, projB, slugA, gitInfo };
     }
 
-    it('records each project\'s remote and the shared root in the manifest', () => {
+    it('records each project\'s remote and the shared root in the manifest', async () => {
       const { gitInfo } = seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
-      const made = backup.createBackup(dest, { appRoot, gitInfo });
+      const made = await backup.createBackup(dest, { appRoot, gitInfo });
       expect(made.ok).toBe(true);
 
       const m = JSON.parse(fs.readFileSync(path.join(dest, 'manifest.json'), 'utf8'));
@@ -318,7 +318,7 @@ describe('backup', () => {
     it('clones repos, creates plain folders, and remaps everything to the new root', async () => {
       const { projA, gitInfo } = seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot, gitInfo });
+      await backup.createBackup(dest, { appRoot, gitInfo });
 
       const workDir = path.join(tmpRoot, 'newmachine');
       const cloned = [];
@@ -360,7 +360,7 @@ describe('backup', () => {
     it('counts folders it is about to create as present, so the preview is not all skips', async () => {
       const { gitInfo } = seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot, gitInfo });
+      await backup.createBackup(dest, { appRoot, gitInfo });
 
       const back = await backup.restoreBackup(dest, {
         appRoot, workDir: path.join(tmpRoot, 'nowhere-yet'), dryRun: true,
@@ -374,7 +374,7 @@ describe('backup', () => {
     it('reports a failed clone instead of pretending it worked', async () => {
       const { gitInfo } = seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot, gitInfo });
+      await backup.createBackup(dest, { appRoot, gitInfo });
 
       const back = await backup.restoreBackup(dest, {
         appRoot,
@@ -392,7 +392,7 @@ describe('backup', () => {
     it('refuses a workDir restore of a backup that recorded no root', async () => {
       seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot });
+      await backup.createBackup(dest, { appRoot });
       // Simulate a v1 backup: supported for reading, but nothing to derive from.
       const mp = path.join(dest, 'manifest.json');
       const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
@@ -408,7 +408,7 @@ describe('backup', () => {
     it('still reads a v1 backup with an explicit remap', async () => {
       const { projA } = seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
-      backup.createBackup(dest, { appRoot });
+      await backup.createBackup(dest, { appRoot });
       const mp = path.join(dest, 'manifest.json');
       const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
       m.version = 1;
@@ -418,6 +418,148 @@ describe('backup', () => {
       expect(back.ok).toBe(true);
       const restored = JSON.parse(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8'));
       expect(restored.map((s) => s.cwd)).toContain(projA);
+    });
+  });
+
+  // A .zip destination is the carry-one-file case. It has to round-trip through
+  // a real archive, not a staged copy, and restore has to accept either form.
+  describe('zip archive', () => {
+    function seedOne() {
+      const proj = path.join(tmpRoot, 'src', 'alpha');
+      fs.mkdirSync(proj, { recursive: true });
+      write(path.join(appRoot, 'sessions.json'), [{ id: 's1', cwd: proj, title: 'alpha' }]);
+      write(path.join(appRoot, 'config.json'), { recents: [proj], pinned: [], cwd: proj });
+      const slug = backup.projectSlug(proj);
+      write(path.join(fakeHome, '.claude', 'projects', slug, 'conv.jsonl'),
+        JSON.stringify({ type: 'user', cwd: proj, message: 'hi' }) + '\n');
+      return { proj, slug };
+    }
+
+    it('detects a .zip destination by extension, case-insensitively', () => {
+      expect(backup.isZipPath('a/b.zip')).toBe(true);
+      expect(backup.isZipPath('a/b.ZIP')).toBe(true);
+      expect(backup.isZipPath('a/b')).toBe(false);
+    });
+
+    it('writes a single file instead of a tree', async () => {
+      seedOne();
+      const dest = path.join(tmpRoot, 'bk.zip');
+      const made = await backup.createBackup(dest, { appRoot });
+      expect(made.ok).toBe(true);
+      expect(made.zipped).toBe(true);
+      expect(fs.statSync(dest).isFile()).toBe(true);
+      expect(made.bytes).toBeGreaterThan(0);
+      // ZIP local file header magic — it's a real archive, not a renamed folder.
+      const head = fs.readFileSync(dest).subarray(0, 4);
+      expect([...head]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    });
+
+    // Regression: yazl's addFile() stats the file and then throws if the stream
+    // delivers a different byte count. Transcripts are appended to by every
+    // running session, so a file growing mid-backup is normal — this threw
+    // "file data stream has unexpected number of bytes" on real data.
+    it('survives a transcript that grows while it is being archived', async () => {
+      const proj = path.join(tmpRoot, 'src', 'alpha');
+      fs.mkdirSync(proj, { recursive: true });
+      write(path.join(appRoot, 'sessions.json'), [{ id: 's1', cwd: proj, title: 'alpha' }]);
+
+      // Big enough that reading it spans several ticks, giving the appends below
+      // a chance to land mid-stream.
+      const slug = backup.projectSlug(proj);
+      const conv = path.join(fakeHome, '.claude', 'projects', slug, 'conv.jsonl');
+      const line = JSON.stringify({ type: 'user', cwd: proj, message: 'x'.repeat(400) }) + '\n';
+      write(conv, line.repeat(8000));
+
+      const dest = path.join(tmpRoot, 'bk.zip');
+      let appends = 0;
+      const timer = setInterval(() => { fs.appendFileSync(conv, line); appends++; }, 0);
+      let made;
+      try {
+        made = await backup.createBackup(dest, { appRoot });
+      } finally {
+        clearInterval(timer);
+      }
+
+      expect(appends).toBeGreaterThan(0); // the race actually happened
+      expect(made.ok).toBe(true);
+      expect(fs.statSync(dest).isFile()).toBe(true);
+
+      // And the archive is still readable end to end.
+      const back = await backup.restoreBackup(dest, { appRoot, dryRun: true });
+      expect(back.ok).toBe(true);
+    });
+
+    it('refuses to overwrite an existing archive', async () => {
+      seedOne();
+      const dest = path.join(tmpRoot, 'bk.zip');
+      fs.writeFileSync(dest, 'already here');
+      const made = await backup.createBackup(dest, { appRoot });
+      expect(made.ok).toBe(false);
+      expect(made.message).toContain('already exists');
+      expect(fs.readFileSync(dest, 'utf8')).toBe('already here');
+    });
+
+    it('restores straight from the .zip, remapping as usual', async () => {
+      const { proj, slug } = seedOne();
+      const dest = path.join(tmpRoot, 'bk.zip');
+      expect((await backup.createBackup(dest, { appRoot })).ok).toBe(true);
+
+      // Wipe the machine, then move the project somewhere new.
+      fs.rmSync(path.join(appRoot, 'sessions.json'));
+      fs.rmSync(path.join(fakeHome, '.claude', 'projects', slug), { recursive: true });
+      const newRoot = path.join(tmpRoot, 'moved');
+      const newA = path.join(newRoot, 'alpha');
+      fs.mkdirSync(newA, { recursive: true });
+
+      const back = await backup.restoreBackup(dest, {
+        appRoot, remap: { [path.join(tmpRoot, 'src')]: newRoot },
+      });
+      expect(back.ok).toBe(true);
+
+      const sessions = JSON.parse(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8'));
+      expect(sessions.map((s) => s.cwd)).toEqual([newA]);
+
+      const newSlug = backup.projectSlug(newA);
+      const conv = path.join(fakeHome, '.claude', 'projects', newSlug, 'conv.jsonl');
+      expect(fs.existsSync(conv)).toBe(true);
+      expect(JSON.parse(fs.readFileSync(conv, 'utf8').trim()).cwd).toBe(newA);
+      expect(JSON.parse(fs.readFileSync(conv, 'utf8').trim()).cwd).not.toBe(proj);
+    });
+
+    it('leaves no temp extraction behind', async () => {
+      seedOne();
+      const dest = path.join(tmpRoot, 'bk.zip');
+      await backup.createBackup(dest, { appRoot });
+      const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('cwui-restore-'));
+      await backup.restoreBackup(dest, { appRoot });
+      const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('cwui-restore-'));
+      expect(after).toEqual(before);
+    });
+
+    it('rejects a file that is not a zip', async () => {
+      const notZip = path.join(tmpRoot, 'notes.txt');
+      fs.writeFileSync(notZip, 'hello');
+      const back = await backup.restoreBackup(notZip, { appRoot });
+      expect(back.ok).toBe(false);
+      expect(back.message).toContain('not a .zip');
+    });
+
+    it('reports a missing source rather than throwing', async () => {
+      const back = await backup.restoreBackup(path.join(tmpRoot, 'nope.zip'), { appRoot });
+      expect(back.ok).toBe(false);
+      expect(back.message).toContain('not found');
+    });
+
+    // A backup travels on removable media and its entry names are trivially
+    // editable, so they're untrusted input: an entry must not be able to write
+    // outside the extraction folder.
+    it('refuses archive entries that would escape the extraction folder', () => {
+      const root = path.join(tmpRoot, 'out');
+      expect(backup.safeEntryPath(root, 'app/config.json')).toBe(path.join(root, 'app', 'config.json'));
+      expect(backup.safeEntryPath(root, '../escaped.json')).toBeNull();
+      expect(backup.safeEntryPath(root, 'a/../../escaped.json')).toBeNull();
+      expect(backup.safeEntryPath(root, '/abs.json')).toBe(path.join(root, 'abs.json'));
+      expect(backup.safeEntryPath(root, '')).toBeNull();
     });
   });
 

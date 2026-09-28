@@ -261,8 +261,13 @@ wss.on('connection', (ws) => {
         // with sessions open — unlike restore.
         send({ type: 'backupstart' });
         try {
-          const r = createBackup(msg.dest, { includeTranscripts: msg.includeTranscripts !== false });
-          send({ type: 'backupdone', ok: r.ok, message: r.message, totalBytes: r.totalBytes || 0 });
+          // Async since a .zip destination streams the whole thing through a
+          // compressor rather than just copying files.
+          const r = await createBackup(msg.dest, { includeTranscripts: msg.includeTranscripts !== false });
+          send({
+            type: 'backupdone', ok: r.ok, message: r.message,
+            totalBytes: r.totalBytes || 0, bytes: r.bytes || 0, zipped: !!r.zipped,
+          });
         } catch (err) {
           send({ type: 'backupdone', ok: false, message: err.message });
         }

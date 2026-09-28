@@ -31,7 +31,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const readline = require('readline');
+const { pipeline } = require('stream/promises');
 const { execFileSync } = require('child_process');
+const yazl = require('yazl');
+const yauzl = require('yauzl');
 const { claudeProjectDir } = require('./claude');
 
 const APP_ROOT = path.join(__dirname, '..');
@@ -104,6 +107,140 @@ function dirSize(dir) {
 // The slug Claude Code uses for a folder — the tail of claudeProjectDir().
 function projectSlug(cwd) {
   return path.basename(claudeProjectDir(cwd));
+}
+
+// ---------------------------------------------------------------- archive I/O
+
+// Every file under `dir`, as paths relative to it. Used to enumerate a project's
+// transcripts so they can be streamed into a zip without staging a copy first.
+function walkFiles(dir, base = dir) {
+  const out = [];
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkFiles(full, base));
+    else out.push(path.relative(base, full));
+  }
+  return out;
+}
+
+// A backup is described as a flat list of entries — `{ to }` plus either a
+// source path or a literal buffer — so the folder writer and the zip writer are
+// two renderings of the same thing rather than two separate implementations.
+function writeTree(destDir, entries) {
+  for (const e of entries) {
+    const dest = path.join(destDir, e.to);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    if (e.data) fs.writeFileSync(dest, e.data);
+    else fs.copyFileSync(e.from, dest);
+  }
+}
+
+// yazl reads each source lazily as it writes, so a 1 GB backup never has to fit
+// in memory and no staging copy is needed.
+//
+// addReadStream, NOT addFile: addFile() stats the file first and then throws
+// ("file data stream has unexpected number of bytes") if the stream delivers a
+// different count. Transcripts are LIVE — the CLI appends to the .jsonl of every
+// running session, quite possibly the session running this backup — so a file
+// growing mid-read is the normal case, not an edge case. Given no size up front,
+// yazl writes a data descriptor after each entry with the actual CRC and length,
+// so whatever was read is what gets archived.
+//
+// A transcript caught mid-append can end on a half-written JSON line. That's
+// fine: rewriteTranscript() passes unparseable lines through untouched, so a
+// torn tail survives as-is instead of breaking the restore.
+async function writeZip(destFile, entries) {
+  const zip = new yazl.ZipFile();
+
+  // yazl reports failures by emitting 'error' on the ZipFile, NOT on
+  // outputStream — so pipeline() never sees them and an unhandled 'error' event
+  // takes the whole server down. Turn it into a rejection we can return as a
+  // failed backup. Reading a live directory can hit a file that was deleted or
+  // locked between enumerating it and streaming it, so this is reachable.
+  const failed = new Promise((_, reject) => zip.on('error', reject));
+
+  for (const e of entries) {
+    if (e.data) zip.addBuffer(e.data, e.to);
+    else zip.addReadStream(fs.createReadStream(e.from), e.to);
+  }
+  zip.end();
+  await Promise.race([
+    pipeline(zip.outputStream, fs.createWriteStream(destFile)),
+    failed,
+  ]);
+}
+
+// Reject entry names that would escape the extraction root ("zip slip"), and
+// normalize separators. A backup is usually one we wrote, but it arrives from
+// another machine on removable media and is trivially editable, so treat its
+// entry names as untrusted input rather than as our own output.
+function safeEntryPath(destDir, name) {
+  const cleaned = String(name).replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!cleaned || cleaned.split('/').some((seg) => seg === '..')) return null;
+  const full = path.resolve(destDir, cleaned);
+  const root = path.resolve(destDir);
+  return full === root || full.startsWith(root + path.sep) ? full : null;
+}
+
+async function extractZip(srcFile, destDir) {
+  const skipped = [];
+  await new Promise((resolve, reject) => {
+    yauzl.open(srcFile, { lazyEntries: true, autoClose: true }, (err, zip) => {
+      if (err) return reject(err);
+      zip.on('error', reject);
+      zip.on('end', resolve);
+      zip.readEntry();
+      zip.on('entry', (entry) => {
+        const target = safeEntryPath(destDir, entry.fileName);
+        if (!target) { skipped.push(entry.fileName); return zip.readEntry(); }
+        if (/\/$/.test(entry.fileName)) {
+          fs.mkdirSync(target, { recursive: true });
+          return zip.readEntry();
+        }
+        zip.openReadStream(entry, (e2, rs) => {
+          if (e2) return reject(e2);
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          const ws = fs.createWriteStream(target);
+          rs.on('error', reject);
+          ws.on('error', reject);
+          ws.on('close', () => zip.readEntry());
+          rs.pipe(ws);
+        });
+      });
+    });
+  });
+  return { skipped };
+}
+
+// True when `dest` should be a single archive file rather than a folder tree.
+function isZipPath(p) {
+  return /\.zip$/i.test(String(p || ''));
+}
+
+// Give restoreBackup() a directory to read, whether it was handed a folder or a
+// .zip. The caller must call cleanup() — it removes the temp extraction, if any.
+async function openBackup(src) {
+  let stat;
+  try { stat = fs.statSync(src); } catch { return { ok: false, message: `${src} not found.` }; }
+
+  if (stat.isDirectory()) return { ok: true, dir: src, cleanup: () => {} };
+
+  if (!isZipPath(src)) {
+    return { ok: false, message: `${src} is a file but not a .zip — point this at a backup folder or a .zip.` };
+  }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cwui-restore-'));
+  try {
+    const { skipped } = await extractZip(src, tmp);
+    return {
+      ok: true, dir: tmp, skipped,
+      cleanup: () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} },
+    };
+  } catch (err) {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    return { ok: false, message: `Could not read ${src}: ${err.message}` };
+  }
 }
 
 // --------------------------------------------------------------------- git
@@ -245,17 +382,25 @@ function planBackup(opts = {}) {
 
 // ------------------------------------------------------------------- backup
 
-// Copy this machine's app state (and optionally each session's transcripts)
-// into `destDir`, alongside a manifest describing where it all came from.
-function createBackup(destDir, opts = {}) {
+// Copy this machine's app state (and optionally each session's transcripts) to
+// `dest`, alongside a manifest describing where it all came from.
+//
+// `dest` ending in .zip produces a single file — one thing to carry to the other
+// machine, and the transcripts are plain text so they compress hard. Anything
+// else produces the same layout as a folder tree. Both are built from one entry
+// list, so the two outputs can't drift apart.
+async function createBackup(dest, opts = {}) {
   const includeTranscripts = opts.includeTranscripts !== false;
   const appRoot = opts.appRoot || APP_ROOT;
-  if (!destDir) return { ok: false, message: 'No destination folder given.' };
+  if (!dest) return { ok: false, message: 'No destination given.' };
 
-  if (fs.existsSync(destDir) && fs.readdirSync(destDir).length > 0) {
-    return { ok: false, message: `${destDir} already exists and is not empty.` };
+  const asZip = isZipPath(dest);
+  if (asZip) {
+    if (fs.existsSync(dest)) return { ok: false, message: `${dest} already exists.` };
+    fs.mkdirSync(path.dirname(path.resolve(dest)), { recursive: true });
+  } else if (fs.existsSync(dest) && fs.readdirSync(dest).length > 0) {
+    return { ok: false, message: `${dest} already exists and is not empty.` };
   }
-  fs.mkdirSync(path.join(destDir, 'app'), { recursive: true });
 
   const plan = planBackup(opts);
   const manifest = {
@@ -277,27 +422,42 @@ function createBackup(destDir, opts = {}) {
     atRisk: plan.atRisk,
   };
 
+  const entries = [{ data: Buffer.from(JSON.stringify(manifest, null, 2)), to: 'manifest.json' }];
   for (const name of ['config.json', 'sessions.json']) {
     const src = path.join(appRoot, name);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(destDir, 'app', name));
+    if (fs.existsSync(src)) entries.push({ from: src, to: 'app/' + name });
   }
 
   let copied = 0;
   if (includeTranscripts) {
     for (const p of plan.projects) {
       if (!p.hasTranscripts) continue;
-      fs.cpSync(claudeProjectDir(p.cwd), path.join(destDir, 'projects', p.slug), { recursive: true });
+      const dir = claudeProjectDir(p.cwd);
+      for (const rel of walkFiles(dir)) {
+        // Zip entry names are always '/'-separated, whatever this platform uses.
+        entries.push({ from: path.join(dir, rel), to: `projects/${p.slug}/${rel.split(path.sep).join('/')}` });
+      }
       copied++;
     }
   }
 
-  fs.writeFileSync(path.join(destDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  if (asZip) await writeZip(dest, entries);
+  else writeTree(dest, entries);
+
+  const rawBytes = includeTranscripts ? plan.totalBytes : 0;
+  let bytes = rawBytes;
+  if (asZip) { try { bytes = fs.statSync(dest).size; } catch { /* keep the estimate */ } }
+
   return {
     ok: true,
     message: `Backed up ${plan.sessionCount} sessions and ${copied} project ` +
-      `${copied === 1 ? 'history' : 'histories'}.`,
+      `${copied === 1 ? 'history' : 'histories'}` +
+      (asZip ? ` into one file (${Math.max(1, Math.round(bytes / 1048576))} MB).` : '.'),
     manifest,
-    totalBytes: includeTranscripts ? plan.totalBytes : 0,
+    zipped: asZip,
+    // What actually landed on disk, so the UI can show the compressed size.
+    bytes,
+    totalBytes: rawBytes,
   };
 }
 
@@ -336,10 +496,22 @@ async function rewriteTranscript(srcFile, destFile, rules) {
 //
 // Long-running once cloning is involved, so progress goes to `onLog` as it
 // happens; the returned `log` is the same story without the raw git chatter.
-async function restoreBackup(srcDir, opts = {}) {
+// Accepts a backup folder or a .zip. A zip is extracted to a temp directory
+// first and removed afterwards, so everything below only ever sees a directory.
+async function restoreBackup(src, opts = {}) {
+  const opened = await openBackup(src);
+  if (!opened.ok) return { ok: false, message: opened.message };
+  try {
+    return await restoreFromDir(opened.dir, opts, opened.skipped || []);
+  } finally {
+    opened.cleanup();
+  }
+}
+
+async function restoreFromDir(srcDir, opts = {}, unsafeEntries = []) {
   const manifestPath = path.join(srcDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
-    return { ok: false, message: `No manifest.json in ${srcDir} — not a backup folder.` };
+    return { ok: false, message: `No manifest.json in ${srcDir} — not a backup folder or archive.` };
   }
   const manifest = readJson(manifestPath, null);
   if (!manifest || !SUPPORTED_VERSIONS.includes(manifest.version)) {
@@ -350,6 +522,10 @@ async function restoreBackup(srcDir, opts = {}) {
   const log = [];
   const onLog = typeof opts.onLog === 'function' ? opts.onLog : () => {};
   const say = (line) => { log.push(line); onLog(line + '\n'); };
+
+  for (const name of unsafeEntries) {
+    say(`ignored unsafe archive entry "${name}" (would escape the extraction folder)`);
+  }
 
   // --- where everything now lives
   let rules;
@@ -504,5 +680,5 @@ async function restoreBackup(srcDir, opts = {}) {
 module.exports = {
   BACKUP_VERSION, SUPPORTED_VERSIONS, planBackup, createBackup, restoreBackup,
   remapPath, pathStartsWith, normalizeRules, projectSlug, rewriteTranscript,
-  gitInfo, commonRoot,
+  gitInfo, commonRoot, isZipPath, safeEntryPath, walkFiles,
 };

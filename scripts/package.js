@@ -6,8 +6,9 @@
  * layout can be built and RUN locally, on any host, without either toolchain.
  *
  * What ships is much smaller than the repo: server/ (minus tests), web/dist,
- * and four runtime dependencies. Vite/Svelte/Rollup are devDependencies used to
- * produce web/dist — they never travel.
+ * and whatever is in package.json `dependencies` — copied verbatim below, so
+ * adding a runtime dep needs no change here. Vite/Svelte/Rollup are
+ * devDependencies used to produce web/dist — they never travel.
  *
  * Cross-building works because the one native dependency, @lydell/node-pty,
  * publishes per-platform prebuilds as optional deps. `npm install --os --cpu`

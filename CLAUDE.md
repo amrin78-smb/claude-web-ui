@@ -88,6 +88,21 @@ is for whoever (human or Claude) is editing the code.
     mirroring `update`. v1 backups are still readable (`SUPPORTED_VERSIONS`)
     but have no recorded root or remotes, so they need the manual old→new
     root pair — which the restore modal keeps behind a toggle.
+
+    A destination ending in `.zip` writes one file instead of a tree, and
+    `restoreBackup()` takes either (a zip is extracted to a temp dir, used, then
+    removed — so everything past `openBackup()` only ever sees a directory).
+    Both outputs are rendered from one entry list, so they can't drift apart.
+    `yazl`/`yauzl` rather than a hand-rolled writer: zip needs deflate, a CRC32
+    per entry and a central directory, which is a different proposition from the
+    ~40-line `ar` writer in `build-deb.js`. They stream, which matters — a 1 GB
+    backup must never have to fit in memory, and `addFile()` reads lazily so no
+    staging copy is needed. Compression is dramatic because transcripts are
+    repetitive JSON text. Note `createBackup()` is therefore **async**.
+
+    Archive entry names are treated as untrusted (`safeEntryPath` rejects `..`
+    and absolute escapes): a backup arrives from another machine on removable
+    media and is trivially editable, so "we wrote it" isn't a safety argument.
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.
