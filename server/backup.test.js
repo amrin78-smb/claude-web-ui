@@ -440,20 +440,51 @@ describe('backup', () => {
       expect(restored.map((s) => s.title)).toEqual(['beta']);
     });
 
-    it('refuses a workDir restore of a backup that recorded no root', async () => {
+    // A v1 backup records no commonRoot, but it does list every project's cwd —
+    // which is what commonRoot() derives from anyway. This used to be a hard
+    // refusal that redirected people to the manual old->new mode, and that mode
+    // provisions nothing, so it then demanded every original folder already exist
+    // on the new machine. Refusing the workable path forced the unworkable one.
+    it('derives the root for a backup that recorded none, into a folder that does not exist', async () => {
       seedTwoProjects();
       const dest = path.join(tmpRoot, 'backup');
       await backup.createBackup(dest, { appRoot });
-      // Simulate a v1 backup: supported for reading, but nothing to derive from.
+
+      const mp = path.join(dest, 'manifest.json');
+      const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
+      delete m.commonRoot;                       // v1 shape
+      for (const p of m.projects) delete p.repo; // v1 knew no remotes either
+      m.version = 1;
+      fs.writeFileSync(mp, JSON.stringify(m));
+
+      const workDir = path.join(tmpRoot, 'nowhere', 'yet');
+      expect(fs.existsSync(workDir)).toBe(false);
+
+      const back = await backup.restoreBackup(dest, { appRoot, workDir });
+      expect(back.ok).toBe(true);
+      expect(back.log.join('\n')).toContain('Derived root');
+      // No remotes to clone from, so say so instead of leaving silent empty dirs.
+      expect(back.log.join('\n')).toContain('records no git remotes');
+
+      // Both folders exist and no session was dropped for being "not found here".
+      const kept = JSON.parse(fs.readFileSync(path.join(appRoot, 'sessions.json'), 'utf8'));
+      expect(kept).toHaveLength(2);
+      for (const s of kept) expect(fs.existsSync(s.cwd)).toBe(true);
+    });
+
+    it('still refuses a workDir restore when the backup lists no projects at all', async () => {
+      seedTwoProjects();
+      const dest = path.join(tmpRoot, 'backup');
+      await backup.createBackup(dest, { appRoot });
       const mp = path.join(dest, 'manifest.json');
       const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
       delete m.commonRoot;
-      m.version = 1;
+      m.projects = [];
       fs.writeFileSync(mp, JSON.stringify(m));
 
       const back = await backup.restoreBackup(dest, { appRoot, workDir: path.join(tmpRoot, 'x') });
       expect(back.ok).toBe(false);
-      expect(back.message).toContain('does not record a root folder');
+      expect(back.message).toContain('no project folders');
     });
 
     it('still reads a v1 backup with an explicit remap', async () => {

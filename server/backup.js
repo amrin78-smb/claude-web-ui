@@ -641,16 +641,35 @@ async function restoreFromDir(srcDir, opts = {}, unsafeEntries = []) {
 
   // --- where everything now lives
   let rules;
+  let canClone = true;
   if (opts.workDir) {
-    if (!manifest.commonRoot) {
+    // A v1 manifest has no recorded commonRoot, but it does list every project's
+    // cwd — which is what commonRoot() is computed from in the first place. This
+    // used to be a hard refusal that sent people to the manual old->new mode,
+    // and THAT mode provisions nothing, so it demanded every original folder
+    // already exist on the new machine. Refusing the easy path pushed users into
+    // the one that couldn't work. Derive it instead.
+    let root = manifest.commonRoot;
+    if (!root) {
+      root = commonRoot((manifest.projects || []).map((p) => p && p.cwd).filter(Boolean));
+      if (root) say(`Derived root ${root} from the project paths (this backup predates recorded roots)`);
+    }
+    if (!root) {
       return {
         ok: false,
-        message: 'This backup does not record a root folder (it predates that), ' +
-          'so a working folder cannot be derived. Give an explicit old -> new root instead.',
+        message: 'This backup records no project folders, so there is no root to map. ' +
+          'Give an explicit old -> new root instead.',
       };
     }
-    rules = normalizeRules({ [manifest.commonRoot]: opts.workDir });
-    say(`Mapping ${manifest.commonRoot} -> ${opts.workDir}`);
+    // v1 also has no per-project remote, so folders can be created but not
+    // filled. Say so rather than silently producing empty directories.
+    canClone = (manifest.projects || []).some((p) => p && p.repo);
+    if (!canClone) {
+      say('This backup records no git remotes, so folders will be created empty — ' +
+        'use Sync, or clone into them yourself, afterwards.');
+    }
+    rules = normalizeRules({ [root]: opts.workDir });
+    say(`Mapping ${root} -> ${opts.workDir}`);
   } else {
     rules = normalizeRules(opts.remap);
   }
