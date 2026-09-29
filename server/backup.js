@@ -41,7 +41,10 @@ const { claudeProjectDir } = require('./claude');
 
 const execFileP = promisify(execFile);
 
-const APP_ROOT = path.join(__dirname, '..');
+// Backup reads and writes the app's STATE (config.json, sessions.json), which
+// is not necessarily beside its code — see paths.js. `opts.appRoot` overrides
+// it, which is how the tests point at a temp directory.
+const APP_ROOT = require('./paths').STATE_DIR;
 const BACKUP_VERSION = 2;
 // v1 backups have no `repos`/`commonRoot`, so they can't auto-provision, but
 // they restore fine with an explicit remap. Keep reading them.
@@ -52,8 +55,18 @@ const SUPPORTED_VERSIONS = [1, 2];
 // Compare two absolute paths for "is `p` inside `prefix`", tolerating separator
 // and case differences (Windows is case-insensitive; a cross-platform restore
 // mixes \ and / freely).
-function pathStartsWith(p, prefix) {
-  const norm = (s) => String(s).replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+// `ci` = compare case-insensitively. That is right for paths that came from a
+// Windows machine and wrong for ones that came from Linux, where Proj and proj
+// are different directories — so it follows the path's ORIGIN, not the platform
+// we happen to be restoring on. Getting it wrong on Linux is not academic:
+// normalizeRules() drops a rule whose two sides look equal, so a remap that
+// only changes a folder's capitalisation would be silently discarded.
+function pathStartsWith(p, prefix, ci) {
+  const fold = ci === undefined ? process.platform === 'win32' : ci;
+  const norm = (s) => {
+    const t = String(s).replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    return fold ? t.toLowerCase() : t;
+  };
   const a = norm(p);
   const b = norm(prefix);
   return a === b || a.startsWith(b + '/');
@@ -64,8 +77,8 @@ function pathStartsWith(p, prefix) {
 // onto a POSIX root comes out as a valid POSIX path rather than a hybrid.
 function remapPath(p, rules) {
   if (typeof p !== 'string' || !p) return p;
-  for (const { from, to } of rules) {
-    if (!pathStartsWith(p, from)) continue;
+  for (const { from, to, ci } of rules) {
+    if (!pathStartsWith(p, from, ci)) continue;
     const rest = p.slice(from.replace(/[\\/]+$/, '').length);
     const sep = to.includes('\\') && !to.includes('/') ? '\\' : '/';
     const converted = rest.replace(/[\\/]+/g, sep);
@@ -76,12 +89,12 @@ function remapPath(p, rules) {
 
 // Normalize caller-supplied remap rules into a stable, longest-first list, so a
 // nested root (…\Nocvault\sub) wins over its parent (…\Nocvault).
-function normalizeRules(remap) {
+function normalizeRules(remap, ci) {
   const rules = [];
   for (const [from, to] of Object.entries(remap || {})) {
     if (!from || !to) continue;
-    if (pathStartsWith(from, to) && pathStartsWith(to, from)) continue; // no-op
-    rules.push({ from, to });
+    if (pathStartsWith(from, to, ci) && pathStartsWith(to, from, ci)) continue; // no-op
+    rules.push({ from, to, ci });
   }
   rules.sort((a, b) => b.from.length - a.from.length);
   return rules;
@@ -631,6 +644,12 @@ async function restoreFromDir(srcDir, opts = {}, unsafeEntries = []) {
   }
 
   const appRoot = opts.appRoot || APP_ROOT;
+  // Whether the backup was WRITTEN on Windows decides how its recorded paths
+  // compare — see pathStartsWith. A fixture with no recorded platform falls
+  // back to the platform we are running on.
+  const sourceIsWindows = manifest.platform
+    ? manifest.platform === "win32"
+    : process.platform === "win32";
   const log = [];
   const onLog = typeof opts.onLog === 'function' ? opts.onLog : () => {};
   const say = (line) => { log.push(line); onLog(line + '\n'); };
@@ -668,10 +687,12 @@ async function restoreFromDir(srcDir, opts = {}, unsafeEntries = []) {
       say('This backup records no git remotes, so folders will be created empty — ' +
         'use Sync, or clone into them yourself, afterwards.');
     }
-    rules = normalizeRules({ [root]: opts.workDir });
+    // The recorded paths came from the machine that made the backup, so case
+    // folding follows THAT platform, not this one.
+    rules = normalizeRules({ [root]: opts.workDir }, sourceIsWindows);
     say(`Mapping ${root} -> ${opts.workDir}`);
   } else {
-    rules = normalizeRules(opts.remap);
+    rules = normalizeRules(opts.remap, sourceIsWindows);
   }
 
   // --- provision the project folders so the paths below actually exist.

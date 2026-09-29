@@ -11,8 +11,10 @@
 const fs = require('fs');
 const path = require('path');
 
-// config.json lives in the repo root; this file is in server/, so go up one.
-const CONFIG_PATH = path.join(__dirname, '..', 'config.json');
+// config.json lives with the app's other state — usually the repo/install
+// root, but a per-user directory when that isn't writable (see paths.js).
+const { STATE_DIR } = require('./paths');
+const CONFIG_PATH = path.join(STATE_DIR, 'config.json');
 
 function loadConfig() {
   let raw = {};

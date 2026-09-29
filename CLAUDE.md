@@ -105,7 +105,14 @@ is for whoever (human or Claude) is editing the code.
     staging copy is needed. Compression is dramatic because transcripts are
     repetitive JSON text. Note `createBackup()` is therefore **async**.
 
-    Archive entry names are treated as untrusted (`safeEntryPath` rejects `..`
+    Path comparison follows the platform the backup came FROM, not the one it is
+being restored on: `manifest.platform` decides whether `pathStartsWith` folds
+case. Folding unconditionally was wrong on Linux, where `Proj` and `proj` are
+different directories — and quietly so, because `normalizeRules()` discards a
+rule whose two sides compare equal, which silently threw away any remap that
+only changed a folder's capitalisation.
+
+Archive entry names are treated as untrusted (`safeEntryPath` rejects `..`
     and absolute escapes): a backup arrives from another machine on removable
     media and is trivially editable, so "we wrote it" isn't a safety argument.
 
@@ -145,6 +152,29 @@ is for whoever (human or Claude) is editing the code.
 `server.js` + `public/index.html` at the repo root are the **old pre-rewrite
 single-file version**, kept only for behavioral reference (`REWRITE_SPEC.md`
 documents the port). Don't modify them; new code lives in `server/` and `web/`.
+
+## Where state lives
+
+`server/paths.js` resolves two directories: `APP_DIR` (the code) and
+`STATE_DIR` (`config.json`, `sessions.json`, `server.pid`). They are the same
+directory whenever it is writable — which is every Windows install and every dev
+checkout, so nothing migrates — and `STATE_DIR` falls back to
+`$XDG_STATE_HOME`/`~/.local/state/claude-web-ui` when it is not.
+
+That fallback exists because the .deb installs to `/opt/claude-web-ui` owned by
+root while the app runs as *you*, so every state write was denied — silently,
+since `saveConfig()` and `_persist()` both swallow errors. The server started,
+served the UI, and remembered nothing: no pidfile for the stop script, no
+sessions across a restart, no settings, and nothing for a backup to collect.
+Only running it on Linux as a non-root user surfaced that.
+
+The choice is a write probe rather than a platform check, because whether the
+install directory is writable depends on how it was packaged and who is running
+it, not on the OS. When state does move, `index.js` prints a `State:` line at
+startup — otherwise people go hunting for a config.json that is not there.
+
+Anything else written at runtime (`.claude-web-files/`, `.claude-web-images/`)
+belongs to a *session's* folder, not here, so it is unaffected.
 
 ## Local runtime state (gitignored, machine-specific — never commit)
 
@@ -218,6 +248,16 @@ otherwise reads `C:…` as `host:path`) and the ~40-line `ar` writer is here,
 so no dpkg-deb is needed. Installs to `/opt/claude-web-ui` with a
 `/usr/bin/claude-web-ui` wrapper and a systemd **user** service — user, not
 system, because the app runs as you and reads your `~/.claude`.
+
+Upgrades need help that Windows does not. Linux replaces an open file happily,
+so `dpkg -i` over a running server succeeds and changes nothing the user can
+see — they keep talking to the old code, with no error anywhere. So `postinst`
+restarts it. Reaching the service means `runuser` into each user with a live
+systemd instance plus their `XDG_RUNTIME_DIR`: maintainer scripts run as root,
+and a bare `systemctl --user` there addresses *root's* instance, which is why
+the original `prerm` stop was a no-op. `prerm` now only stops on real removal —
+during an upgrade the service should stay up and be restarted afterwards, so a
+failed upgrade does not leave it down.
 
 `packaging/windows/claude-web-ui.iss` is the Inno Setup script. Per-user
 install (`PrivilegesRequired=lowest`) so there's no UAC prompt.

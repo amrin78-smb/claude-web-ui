@@ -185,7 +185,41 @@ Description: Run Claude Code in your browser
   fs.writeFileSync(path.join(ctrl, 'postinst'),
     `#!/bin/sh
 set -e
+
+# Act on the claude-web-ui *user* service for every user running one.
+#
+# Maintainer scripts run as root, so a plain systemctl --user talks to
+# root's own systemd instance — not the session where this service actually
+# runs. That is why the previous prerm silently did nothing. Reaching a
+# user's instance means becoming that user AND pointing at their runtime dir.
+for_each_running_user() {
+  action="$1"
+  command -v loginctl >/dev/null 2>&1 || return 0
+  command -v runuser  >/dev/null 2>&1 || return 0
+  loginctl list-users --no-legend 2>/dev/null | awk '{print $1, $2}' |
+  while read -r uid uname; do
+    [ -n "$uid" ] && [ -n "$uname" ] || continue
+    [ -d "/run/user/$uid" ] || continue
+    runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid"  systemctl --user is-active --quiet claude-web-ui.service 2>/dev/null || continue
+    runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid"  systemctl --user "$action" claude-web-ui.service >/dev/null 2>&1 || true
+    echo "  claude-web-ui: $action for $uname"
+  done
+}
+
 if [ "$1" = "configure" ]; then
+  # Swapping the files does NOT change the server already running: Linux
+  # replaces a file happily while a process holds it open, so the upgrade
+  # "succeeds" and the user keeps talking to the old code. Restart it.
+  for_each_running_user restart
+
+  # A server started by hand is not ours to kill, but the user should know
+  # it is now stale rather than wonder why nothing changed.
+  if pgrep -f '${INSTALL_DIR}/server/index.js' >/dev/null 2>&1; then
+    echo
+    echo "  A claude-web-ui server is still running the previous version."
+    echo "  Restart it to pick up this one."
+  fi
+
   echo "claude-web-ui installed to ${INSTALL_DIR}."
   echo "  Run it:        claude-web-ui        (then open http://127.0.0.1:4280)"
   echo "  Or as a service: systemctl --user enable --now claude-web-ui"
@@ -201,10 +235,32 @@ exit 0
   fs.writeFileSync(path.join(ctrl, 'prerm'),
     `#!/bin/sh
 set -e
-# Stop the user service if it's running, so removal doesn't leave a server
-# holding port 4280. Failure here must not block removal.
-if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
-  systemctl --user stop claude-web-ui.service >/dev/null 2>&1 || true
+
+# Act on the claude-web-ui *user* service for every user running one.
+#
+# Maintainer scripts run as root, so a plain systemctl --user talks to
+# root's own systemd instance — not the session where this service actually
+# runs. That is why the previous prerm silently did nothing. Reaching a
+# user's instance means becoming that user AND pointing at their runtime dir.
+for_each_running_user() {
+  action="$1"
+  command -v loginctl >/dev/null 2>&1 || return 0
+  command -v runuser  >/dev/null 2>&1 || return 0
+  loginctl list-users --no-legend 2>/dev/null | awk '{print $1, $2}' |
+  while read -r uid uname; do
+    [ -n "$uid" ] && [ -n "$uname" ] || continue
+    [ -d "/run/user/$uid" ] || continue
+    runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid"  systemctl --user is-active --quiet claude-web-ui.service 2>/dev/null || continue
+    runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid"  systemctl --user "$action" claude-web-ui.service >/dev/null 2>&1 || true
+    echo "  claude-web-ui: $action for $uname"
+  done
+}
+
+# Only on real removal. During an upgrade the service should stay up and be
+# restarted by postinst once the new files are in place — stopping it here
+# would leave it down if the upgrade then failed.
+if [ "$1" = "remove" ]; then
+  for_each_running_user stop
 fi
 exit 0
 `, { mode: 0o755 });

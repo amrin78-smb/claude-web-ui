@@ -30,7 +30,8 @@ const HOST = '127.0.0.1';
 // Written on startup, removed on clean shutdown — lets "Stop Claude Web.bat"
 // find and gracefully close this exact process even when it was launched
 // hidden/detached (the Background.vbs launcher) with no console to Ctrl+C.
-const PID_PATH = path.join(__dirname, '..', 'server.pid');
+const paths = require('./paths');
+const PID_PATH = path.join(paths.STATE_DIR, 'server.pid');
 
 // Default working folder (used as the folder-browser default): saved config,
 // then env/cwd, then the user's home.
@@ -519,6 +520,10 @@ server.on('listening', () => {
   console.log(`\n  Claude Code Web UI v2 running:  http://${HOST}:${PORT}\n`);
   console.log(`  Claude launcher: ${CLAUDE}`);
   console.log(`  Static UI: ${fs.existsSync(distDir) ? distDir : '(dev — served by Vite)'}`);
+  // Only worth a line when it is somewhere other than here — otherwise it is
+  // noise. When it moved, saying so is the difference between finding your
+  // config and concluding the app lost it.
+  if (paths.stateIsElsewhere) console.log(`  State:     ${paths.STATE_DIR}`);
   console.log(`  Restored sessions: ${restored}\n`);
 });
 server.listen(PORT, HOST);

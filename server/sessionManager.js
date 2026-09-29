@@ -33,7 +33,7 @@ function lastLine(buffer) {
 // Where the open-session list is persisted so it survives a SERVER restart (not
 // just a page reload). We store only metadata (id/cwd/title) — never the live
 // pty — and rehydrate them as 'stopped' ghosts the user can resume.
-const SESSIONS_PATH = path.join(__dirname, '..', 'sessions.json');
+const SESSIONS_PATH = path.join(require('./paths').STATE_DIR, 'sessions.json');
 
 class SessionManager extends EventEmitter {
   constructor() {
