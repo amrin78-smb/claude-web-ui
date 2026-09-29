@@ -7,6 +7,8 @@ export type Config = {
   repoUrl: string;
   branch: string;
   autoSync: boolean;
+  /** Open a stopped session and it starts itself, resuming its conversation. */
+  autoResume: boolean;
   recents: string[];
   pinned: string[];
   syncWorkDir: string;
@@ -17,6 +19,7 @@ const DEFAULT: Config = {
   repoUrl: '',
   branch: '',
   autoSync: false,
+  autoResume: true,
   recents: [],
   pinned: [],
   syncWorkDir: '',

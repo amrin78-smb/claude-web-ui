@@ -1,8 +1,8 @@
 /* Persistent config — load/save config.json in the repo root.
  *
  * Config shape:
- * { repoUrl, branch, autoSync, cwd, recents:[], pinned:[], syncWorkDir,
- *   syncRepos:[{name,url,branch}] }
+ * { repoUrl, branch, autoSync, autoResume, cwd, recents:[], pinned:[],
+ *   syncWorkDir, syncRepos:[{name,url,branch}] }
  * recents/pinned are new in v2 and always default to []. syncWorkDir/syncRepos
  * back the "workspace sync" feature (Settings > Workspace repos) — a fixed
  * root folder plus a list of repos to clone/pull on demand, independent of
@@ -26,6 +26,10 @@ function loadConfig() {
     repoUrl: raw.repoUrl || '',
     branch: raw.branch || '',
     autoSync: !!raw.autoSync,
+    // Defaults ON, and note the `!== false` rather than `!!`: an older
+    // config.json has no such key, and the wanted behaviour there is to auto
+    // resume, not to fall back to the prompt it is replacing.
+    autoResume: raw.autoResume !== false,
     cwd: raw.cwd || '',
     recents: Array.isArray(raw.recents) ? raw.recents : [],
     pinned: Array.isArray(raw.pinned) ? raw.pinned : [],

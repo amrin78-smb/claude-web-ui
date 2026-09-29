@@ -11,18 +11,53 @@
   import { conn } from '../lib/connection';
   import { fontSize } from '../stores/theme';
   import { toast } from '../stores/ui';
+  import { config } from '../stores/config';
   import { resumeSession, restartSession, type Session } from '../stores/sessions';
   import Icon from './Icon.svelte';
 
   let { session, active }: { session: Session; active: boolean } = $props();
 
+  // Set while auto-resume is spawning, so the overlay doesn't flash up for the
+  // frame between "stopped" and the pty appearing.
+  let autoStarting = $state(false);
+  let autoStartedFor = $state('');
+
   // A stopped session has no live pty. Show a start/resume overlay over the
   // (empty or exited) terminal so the user has a clear call to action — this is
   // what a restored ghost session lands on after a server restart.
-  const showOverlay = $derived(session.status === 'stopped');
+  const showOverlay = $derived(session.status === 'stopped' && !autoStarting);
 
   function resume() { const { cols, rows } = dims(); resumeSession(session.id, cols, rows); }
   function startFresh() { const { cols, rows } = dims(); restartSession(session.id, cols, rows); }
+
+  // ---- auto-resume ----
+  // After a server restart every session is a stopped ghost, so opening a dozen
+  // of them meant a dozen identical clicks. With autoResume on, opening one
+  // starts it — resuming its conversation when there is one to resume.
+  //
+  // Deliberately keyed on BECOMING ACTIVE, not on "is stopped". A session that
+  // exits while you are watching it must stay stopped and show why: respawning
+  // on the status change would turn a Claude that crashes at startup into an
+  // invisible restart loop. So this fires once per time you open the tab, and a
+  // session that dies under you still gets the overlay.
+  //
+  // Only for the tab you actually opened, too — auto-starting all twelve on
+  // connect would fork twelve Claude processes for sessions you may never look
+  // at.
+  $effect(() => {
+    if (!active) { autoStartedFor = ''; autoStarting = false; return; }
+    if (!$config.autoResume) return;
+    if (session.status !== 'stopped') { autoStarting = false; return; }
+    if (autoStartedFor === session.id) return;   // already handled this opening
+    autoStartedFor = session.id;
+    autoStarting = true;
+    // dims() needs a laid-out terminal; the fit happens in the activation
+    // effect below, so take the next frame rather than this one.
+    requestAnimationFrame(() => {
+      if (session.resumable) resume();
+      else startFresh();
+    });
+  });
 
   let host: HTMLDivElement;
   let term: Terminal;

@@ -14,6 +14,7 @@ describe('loadConfig', () => {
       repoUrl: 'https://example.com/repo.git',
       branch: 'main',
       autoSync: true,
+      autoResume: false,
       cwd: 'C:\\work',
       recents: ['C:\\a', 'C:\\b'],
       pinned: ['C:\\a'],
@@ -24,6 +25,7 @@ describe('loadConfig', () => {
       repoUrl: 'https://example.com/repo.git',
       branch: 'main',
       autoSync: true,
+      autoResume: false,
       cwd: 'C:\\work',
       recents: ['C:\\a', 'C:\\b'],
       pinned: ['C:\\a'],
@@ -35,7 +37,7 @@ describe('loadConfig', () => {
   it('fills in defaults for missing fields', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ repoUrl: 'x' }));
     expect(loadConfig()).toEqual({
-      repoUrl: 'x', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      repoUrl: 'x', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
       syncWorkDir: '', syncRepos: [],
     });
   });
@@ -53,7 +55,7 @@ describe('loadConfig', () => {
   it('returns all defaults when the file is missing or unreadable', () => {
     vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('ENOENT'); });
     expect(loadConfig()).toEqual({
-      repoUrl: '', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      repoUrl: '', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
       syncWorkDir: '', syncRepos: [],
     });
   });
@@ -61,7 +63,7 @@ describe('loadConfig', () => {
   it('returns all defaults when the file has invalid JSON', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue('{not json');
     expect(loadConfig()).toEqual({
-      repoUrl: '', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      repoUrl: '', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
       syncWorkDir: '', syncRepos: [],
     });
   });
@@ -73,7 +75,7 @@ describe('saveConfig', () => {
   it('writes pretty-printed JSON to CONFIG_PATH', () => {
     const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
     const cfg = {
-      repoUrl: 'x', branch: '', autoSync: false, cwd: '', recents: [], pinned: [],
+      repoUrl: 'x', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
       syncWorkDir: '', syncRepos: [],
     };
     saveConfig(cfg);

@@ -137,6 +137,7 @@ function configPayload() {
     repoUrl: cfg.repoUrl || '',
     branch: cfg.branch || '',
     autoSync: !!cfg.autoSync,
+    autoResume: cfg.autoResume !== false,
     recents: cfg.recents || [],
     pinned: cfg.pinned || [],
     syncWorkDir: cfg.syncWorkDir || '',
@@ -243,6 +244,7 @@ wss.on('connection', (ws) => {
         if ('repoUrl' in msg) cfg.repoUrl = msg.repoUrl || '';
         if ('branch' in msg) cfg.branch = msg.branch || '';
         if ('autoSync' in msg) cfg.autoSync = !!msg.autoSync;
+        if ('autoResume' in msg) cfg.autoResume = !!msg.autoResume;
         if ('recents' in msg) cfg.recents = Array.isArray(msg.recents) ? msg.recents : [];
         if ('pinned' in msg) cfg.pinned = Array.isArray(msg.pinned) ? msg.pinned : [];
         if ('syncWorkDir' in msg) cfg.syncWorkDir = msg.syncWorkDir || '';

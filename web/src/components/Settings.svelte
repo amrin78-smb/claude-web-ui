@@ -13,6 +13,7 @@
   let repoUrl = $state($config.repoUrl);
   let branch = $state($config.branch);
   let autoSync = $state($config.autoSync);
+  let autoResume = $state($config.autoResume);
 
   // ---- workspace repo sync (clone/pull a fixed list of repos into a fixed
   // root folder, independent of any session's own cwd) ----
@@ -389,6 +390,7 @@
       repoUrl: repoUrl.trim(),
       branch: branch.trim(),
       autoSync,
+      autoResume,
       syncWorkDir: syncWorkDir.trim(),
       syncRepos,
     });
@@ -546,6 +548,23 @@
             <input id="set-sound" type="checkbox" bind:checked={$soundEnabled} />
             Play a sound too
           </label>
+        </div>
+      </section>
+
+      <section>
+        <div class="eyebrow">Sessions</div>
+
+        <div class="field">
+          <label class="check-row" for="set-autoresume">
+            <input id="set-autoresume" type="checkbox" bind:checked={autoResume} />
+            Start a session when I open it
+          </label>
+          <div class="hint">
+            Opening a stopped session starts Claude straight away, continuing its previous
+            conversation when there is one — instead of asking first. Turn this off to get
+            the "Resume or start fresh" prompt back. "Restart" always starts a fresh
+            conversation either way.
+          </div>
         </div>
       </section>
 
