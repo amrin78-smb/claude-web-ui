@@ -4,6 +4,7 @@
   import { sessions, activeId, restartSession, syncSession } from '../stores/sessions';
   import { showSettings, showDashboard, showDiff, openFolderPicker, toast } from '../stores/ui';
   import { theme } from '../stores/theme';
+  import { build } from '../stores/build';
   import StatusDot from './StatusDot.svelte';
   import Icon from './Icon.svelte';
 
@@ -17,6 +18,19 @@
 
   const dotStatus = $derived(connStatus === 'connected' ? 'running' : 'starting');
   const connLabel = $derived(connStatus === 'connected' ? 'connected' : 'reconnecting…');
+
+  // A dev checkout and a packaged install look identical on screen, and this
+  // app is routinely run as both on one machine — so say which, not just what
+  // version. Blank until the server says (an old server sends nothing), which
+  // is better than asserting a version we don't have.
+  const versionLabel = $derived($build.version ? 'v' + $build.version : '');
+  const versionTitle = $derived(
+    !$build.version
+      ? ''
+      : $build.mode === 'dev'
+        ? `Version ${$build.version}, running from a git checkout`
+        : `Version ${$build.version}, installed build`
+  );
 
   onMount(() => {
     return conn.onStatus((s) => (connStatus = s));
@@ -90,6 +104,11 @@
       <StatusDot status={dotStatus} size={8} />
       <span class="conn-label">{connLabel}</span>
     </span>
+    {#if versionLabel}
+      <span class="build" class:dev={$build.mode === 'dev'} title={versionTitle}>
+        {versionLabel}{#if $build.mode === 'dev'}&nbsp;dev{/if}
+      </span>
+    {/if}
   </div>
 
   <div class="right">
@@ -157,6 +176,22 @@
   .conn-label {
     color: var(--muted);
     font-size: 12px;
+  }
+  .build {
+    flex: none;
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  /* A dev checkout is the one you can accidentally be looking at when you
+     meant the installed app, so let it stand out rather than blend in. */
+  .build.dev {
+    color: var(--danger);
+    border-color: var(--danger);
   }
 
   .right {

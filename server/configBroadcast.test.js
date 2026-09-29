@@ -52,6 +52,36 @@ describe('config broadcast', () => {
   });
 });
 
+describe('build announcement', () => {
+  // The top bar shows which build you're looking at, which only works if the
+  // server volunteers it — the client never asks, because it cannot change
+  // while the process lives.
+  it('sends the build info unprompted on connect', () => {
+    const start = INDEX_SRC.indexOf("wss.on('connection'");
+    const onConnect = INDEX_SRC.slice(start, INDEX_SRC.indexOf("ws.on('message'", start));
+    expect(onConnect).toMatch(/send\(BUILD\)/);
+  });
+
+  it('resolves the version and install mode once, not per connection', () => {
+    // Re-reading package.json and the install marker per socket would be waste
+    // for a value that is fixed for the life of the process.
+    const start = INDEX_SRC.indexOf('const BUILD =');
+    expect(start).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(INDEX_SRC.indexOf("wss.on('connection'"));
+    const body = INDEX_SRC.slice(start, INDEX_SRC.indexOf('})();', start));
+    expect(body).toMatch(/package\.json/);
+    expect(body).toMatch(/installMode\(\)/);
+  });
+
+  it('survives an unreadable package.json rather than failing to boot', () => {
+    // The chip disappearing is acceptable; the server refusing to start is not.
+    const start = INDEX_SRC.indexOf('const BUILD =');
+    const body = INDEX_SRC.slice(start, INDEX_SRC.indexOf('})();', start));
+    expect(body).toMatch(/try\s*{/);
+    expect(body).toMatch(/catch/);
+  });
+});
+
 describe('config payload shape', () => {
   // The payload must cover every field the CLIENT keeps, because a field that
   // never arrives leaves that key at whatever the store already had — stale by

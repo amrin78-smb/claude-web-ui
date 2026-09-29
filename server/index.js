@@ -20,6 +20,7 @@ const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff } = require('./git');
 const { runUpdate } = require('./update');
 const { planBackup, createBackup, restoreBackup } = require('./backup');
+const { installMode } = require('./update');
 const sessions = require('./sessionManager');
 const { getPlanUsage } = require('./planUsage');
 
@@ -114,6 +115,18 @@ wss.on('error', (err) => {
   console.error('  websocket server error:', (err && err.message) || err);
 });
 
+// What this server actually is, resolved once at startup. The UI shows it so
+// "which build am I looking at?" has an answer without opening a dialog — this
+// app is commonly run as BOTH a packaged install and a dev checkout on the same
+// machine, and they are indistinguishable on screen otherwise.
+const BUILD = (() => {
+  let version = '';
+  try {
+    version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || '';
+  } catch { /* a packaged tree always has one; a broken read just hides the chip */ }
+  return { type: 'build', version, mode: installMode().mode };
+})();
+
 // The config wire payload, built in one place. Both the per-socket reply and
 // the broadcasts below use it — when this shape was duplicated per call site,
 // a new writer of config.json (restore) simply forgot to announce it.
@@ -161,6 +174,11 @@ wss.on('connection', (ws) => {
   sessions.on('closed', onClosed);
   sessions.on('idle', onIdle);
   sessions.on('reloaded', onReloaded);
+
+  // Tell the tab what it's connected to. Sent unprompted because it can't
+  // change while this process lives — a reconnect after an update restart
+  // brings the new value with it.
+  send(BUILD);
 
   // Reply with the current config (normalized shape from config.js).
   function sendConfig() {
