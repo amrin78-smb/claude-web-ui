@@ -223,7 +223,7 @@ system, because the app runs as you and reads your `~/.claude`.
 install (`PrivilegesRequired=lowest`) so there's no UAC prompt.
 
 It stops the running server itself, in `PrepareToInstall` (and again on
-uninstall), by taskkilling the pid in `{app}server.pid`. `CloseApplications`
+uninstall), by taskkilling the pid in `{app}\server.pid`. `CloseApplications`
 alone was not enough for two compounding reasons: Restart Manager only inspects
 the extensions in `CloseApplicationsFilter`, whose default `*.exe,*.dll,*.chm`
 never looked at the files this app actually holds open — node-pty's native
