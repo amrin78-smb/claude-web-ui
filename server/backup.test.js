@@ -51,7 +51,10 @@ describe('backup', () => {
   });
 
   describe('remapPath', () => {
-    const rules = [{ from: 'C:\\Users\\me\\proj', to: '/home/me/proj' }];
+    // `ci: true` = these paths came from Windows, so compare case-insensitively.
+    // Without it the rule would follow whatever platform the tests run on, and
+    // a Windows-origin fixture would stop matching on Linux.
+    const rules = [{ from: 'C:\\Users\\me\\proj', to: '/home/me/proj', ci: true }];
 
     it('rewrites a path under the mapped root and converts separators', () => {
       expect(backup.remapPath('C:\\Users\\me\\proj\\app\\src', rules)).toBe('/home/me/proj/app/src');
@@ -78,7 +81,7 @@ describe('backup', () => {
       const nested = backup.normalizeRules({
         'C:\\a': '/one',
         'C:\\a\\b': '/two',
-      });
+      }, true);
       expect(backup.remapPath('C:\\a\\b\\c', nested)).toBe('/two/c');
       expect(backup.remapPath('C:\\a\\z', nested)).toBe('/one/z');
     });
