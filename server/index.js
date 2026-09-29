@@ -114,6 +114,35 @@ wss.on('error', (err) => {
   console.error('  websocket server error:', (err && err.message) || err);
 });
 
+// The config wire payload, built in one place. Both the per-socket reply and
+// the broadcasts below use it — when this shape was duplicated per call site,
+// a new writer of config.json (restore) simply forgot to announce it.
+function configPayload() {
+  const cfg = loadConfig();
+  return {
+    type: 'config',
+    repoUrl: cfg.repoUrl || '',
+    branch: cfg.branch || '',
+    autoSync: !!cfg.autoSync,
+    recents: cfg.recents || [],
+    pinned: cfg.pinned || [],
+    syncWorkDir: cfg.syncWorkDir || '',
+    syncRepos: cfg.syncRepos || [],
+  };
+}
+
+// Push the config on disk to every open tab. Any code path that rewrites
+// config.json behind the clients' backs MUST call this: a tab that still holds
+// the pre-change config will happily push it back on the next save — and every
+// save sends the whole config, not a diff, so a stale tab silently reverts the
+// file. addRecent() saves on every new session, so that is not a rare path.
+function broadcastConfig() {
+  const json = JSON.stringify(configPayload());
+  for (const client of wss.clients) {
+    if (client.readyState === client.OPEN) client.send(json);
+  }
+}
+
 // ---- WebSocket: each connection is a subscriber to sessionManager --------
 wss.on('connection', (ws) => {
   function send(obj) {
@@ -135,17 +164,7 @@ wss.on('connection', (ws) => {
 
   // Reply with the current config (normalized shape from config.js).
   function sendConfig() {
-    const cfg = loadConfig();
-    send({
-      type: 'config',
-      repoUrl: cfg.repoUrl || '',
-      branch: cfg.branch || '',
-      autoSync: !!cfg.autoSync,
-      recents: cfg.recents || [],
-      pinned: cfg.pinned || [],
-      syncWorkDir: cfg.syncWorkDir || '',
-      syncRepos: cfg.syncRepos || [],
-    });
+    send(configPayload());
   }
 
   ws.on('message', async (raw) => {
@@ -211,20 +230,8 @@ wss.on('connection', (ws) => {
         if ('syncWorkDir' in msg) cfg.syncWorkDir = msg.syncWorkDir || '';
         if ('syncRepos' in msg) cfg.syncRepos = Array.isArray(msg.syncRepos) ? msg.syncRepos : [];
         saveConfig(cfg);
-        const payload = {
-          type: 'config',
-          repoUrl: cfg.repoUrl || '',
-          branch: cfg.branch || '',
-          autoSync: !!cfg.autoSync,
-          recents: cfg.recents || [],
-          pinned: cfg.pinned || [],
-          syncWorkDir: cfg.syncWorkDir || '',
-          syncRepos: cfg.syncRepos || [],
-        };
-        // Broadcast to all clients so every open tab stays in sync.
-        for (const client of wss.clients) {
-          if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
-        }
+        // Keep every open tab in sync.
+        broadcastConfig();
         break;
       }
 
@@ -336,6 +343,13 @@ wss.on('connection', (ws) => {
           });
           let reloaded = false;
           if (r.ok) {
+            // A restore rewrites config.json as well as sessions.json — the
+            // repo list, workspace root and recents all change, and every one
+            // of those is remapped to this machine's paths. Without this, tabs
+            // keep the pre-restore config and show an empty Workspace Repos
+            // list, then push that emptiness back over the restored file on
+            // their next save.
+            broadcastConfig();
             const rl = sessions.reloadFromDisk();
             reloaded = rl.ok;
             if (!rl.ok) r.log = [...(r.log || []), `could not reload sessions: ${rl.reason} — restart to pick them up`];
