@@ -105,14 +105,14 @@ is for whoever (human or Claude) is editing the code.
     staging copy is needed. Compression is dramatic because transcripts are
     repetitive JSON text. Note `createBackup()` is therefore **async**.
 
-    Path comparison follows the platform the backup came FROM, not the one it is
-being restored on: `manifest.platform` decides whether `pathStartsWith` folds
-case. Folding unconditionally was wrong on Linux, where `Proj` and `proj` are
-different directories — and quietly so, because `normalizeRules()` discards a
-rule whose two sides compare equal, which silently threw away any remap that
-only changed a folder's capitalisation.
+    Path comparison follows the platform the backup came FROM, not the one it
+    is being restored on: `manifest.platform` decides whether `pathStartsWith`
+    folds case. Folding unconditionally was wrong on Linux, where `Proj` and
+    `proj` are different directories — and quietly so, because
+    `normalizeRules()` discards a rule whose two sides compare equal, which
+    silently threw away any remap that only changed a folder's capitalisation.
 
-Archive entry names are treated as untrusted (`safeEntryPath` rejects `..`
+    Archive entry names are treated as untrusted (`safeEntryPath` rejects `..`
     and absolute escapes): a backup arrives from another machine on removable
     media and is trivially editable, so "we wrote it" isn't a safety argument.
 
