@@ -414,7 +414,15 @@ wss.on('connection', (ws) => {
         send({ type: 'updatestart' });
         const r = await runUpdate(d => send({ type: 'updatelog', data: d }));
         const restarting = !!(r.ok && r.shouldRestart);
-        send({ type: 'updatedone', ok: r.ok, message: r.message, restarting });
+        // url/latest are set only by the packaged path, which checks the release
+        // feed instead of rewriting the install. The panel renders them as a real
+        // download button — leaving the link buried in the log was the whole
+        // reason that path looked like it had hung.
+        send({
+          type: 'updatedone',
+          ok: r.ok, message: r.message, restarting,
+          url: r.url || '', latest: r.latest || '',
+        });
         if (restarting) {
           // Give the client a moment to receive 'updatedone' before the socket drops.
           setTimeout(() => {

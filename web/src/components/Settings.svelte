@@ -70,6 +70,14 @@
   let updateBusy = $state<{ id: string; title: string }[]>([]);
   let connStatus = $state<ConnStatus>('connecting');
   let awaitingReconnect = $state(false);
+  // A successful update does NOT always mean a restart. A packaged install
+  // (.exe/.deb) can't rewrite itself, so its "update" is a check against the
+  // release feed: it succeeds, changes nothing, and stays running. Treating
+  // that as a restart left the panel spinning on "restarting…" for a reboot
+  // that was never coming, with no way out but closing the app.
+  let updateRestarting = $state(false);
+  let updateUrl = $state('');
+  let updateLatest = $state('');
 
   // Updating restarts the server, which kills every live pty. That costs two
   // different things, so the confirm dialog names them separately: a session
@@ -253,6 +261,9 @@
     updateNeedsForce = false;
     updateBusy = [];
     awaitingReconnect = false;
+    updateRestarting = false;
+    updateUrl = '';
+    updateLatest = '';
     updatePhase = 'running';
     // `force` means "the user saw the busy warning and chose to go ahead". Sending
     // it only in that case lets the server catch a session that went busy while
@@ -269,6 +280,9 @@
     updateNeedsForce = false;
     updateBusy = [];
     awaitingReconnect = false;
+    updateRestarting = false;
+    updateUrl = '';
+    updateLatest = '';
     updatePhase = 'running';
     conn.send({ type: 'update', force: true });
   }
@@ -282,7 +296,9 @@
   // then hard-reload — the update just rebuilt the frontend bundle too, and this
   // tab is still running the OLD one in memory until the page actually reloads.
   $effect(() => {
-    if (updatePhase !== 'ok') return;
+    // Only when the server said it is restarting. Otherwise there is no socket
+    // drop to wait for and this would spin forever.
+    if (updatePhase !== 'ok' || !updateRestarting) return;
     if (connStatus !== 'connected') {
       awaitingReconnect = true;
     } else if (awaitingReconnect) {
@@ -306,6 +322,9 @@
         updateMessage = m.message || '';
         updateNeedsForce = !m.ok && !!m.needsForce;
         updateBusy = m.busy || [];
+        updateRestarting = !!m.restarting;
+        updateUrl = m.url || '';
+        updateLatest = m.latest || '';
         updatePhase = m.ok ? 'ok' : 'error';
       } else if (m.type === 'backupplan') {
         backupPlan = m.ok ? {
@@ -786,8 +805,12 @@
       <h3>
         {#if updatePhase === 'running'}
           Updating app…
-        {:else if updatePhase === 'ok'}
+        {:else if updatePhase === 'ok' && updateRestarting}
           Update complete
+        {:else if updatePhase === 'ok' && updateUrl}
+          Update available
+        {:else if updatePhase === 'ok'}
+          Up to date
         {:else}
           Update failed
         {/if}
@@ -798,11 +821,25 @@
             <span class="spin"><Icon name="refresh" size={14} /></span>
             Updating — pulling code, installing dependencies, rebuilding…
           </div>
-        {:else if updatePhase === 'ok'}
+        {:else if updatePhase === 'ok' && updateRestarting}
           <div class="update-status">
             <span class="spin"><Icon name="refresh" size={14} /></span>
             Update complete — restarting… {awaitingReconnect ? 'reconnecting…' : ''}
           </div>
+        {:else if updatePhase === 'ok'}
+          <!-- Nothing was installed: this build checks the release feed and
+               hands over the installer, because it cannot replace itself. -->
+          <div class="update-status">{updateMessage}</div>
+          {#if updateUrl}
+            <p>
+              Download and run the installer to upgrade. It replaces this copy;
+              your sessions and conversation history are untouched.
+            </p>
+            <a class="download-link" href={updateUrl} target="_blank" rel="noopener noreferrer">
+              <Icon name="refresh" size={14} />
+              Download {updateLatest ? 'v' + updateLatest : 'the installer'}
+            </a>
+          {/if}
         {:else if updateNeedsForce}
           <div class="update-status error">{updateMessage}</div>
           {#if updateBusy.length}
@@ -819,7 +856,9 @@
         {#if !updateNeedsForce}<pre class="update-log">{updateLog || '…'}</pre>{/if}
       </div>
       <div class="modal-actions">
-        {#if updatePhase === 'error'}
+        <!-- Every terminal state needs an exit. Only the restart case leaves the
+             panel open deliberately, because the page is about to reload. -->
+        {#if updatePhase === 'error' || (updatePhase === 'ok' && !updateRestarting)}
           <button type="button" onclick={closeUpdatePanel}>Close</button>
           {#if updateNeedsForce}
             <button type="button" class="primary" onclick={forceUpdate}>Update anyway</button>
@@ -1131,6 +1170,22 @@
     padding-left: 20px;
     font-size: 13px;
     color: var(--danger);
+  }
+
+  .download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    padding: 7px 12px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    text-decoration: none;
+  }
+  .download-link:hover {
+    filter: brightness(1.08);
   }
 
   .update-log {
