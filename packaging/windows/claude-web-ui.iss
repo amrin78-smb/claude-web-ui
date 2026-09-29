@@ -42,6 +42,11 @@ UninstallDisplayName={#AppName}
 ; Refuse to install over a running copy rather than leaving half-replaced files.
 CloseApplications=yes
 RestartApplications=no
+; Restart Manager only inspects these extensions, and the default list
+; (*.exe,*.dll,*.chm) misses the files this app actually holds open: node-pty's
+; native .node bindings under node_modules. Without .node here the installer saw
+; no conflict at all and cheerfully replaced everything it could reach.
+CloseApplicationsFilter=*.exe,*.dll,*.chm,*.node
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -64,12 +69,59 @@ Name: "{userstartup}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir
 Filename: "{app}\{#AppExeName}"; Description: "Start Claude Web UI now"; Flags: postinstall nowait shellexec skipifsilent
 Filename: "http://127.0.0.1:4280"; Description: "Open it in the browser"; Flags: postinstall nowait shellexec skipifsilent unchecked
 
-[UninstallRun]
-; Stop the server before removing files, so uninstall doesn't leave a process
-; holding port 4280 (and the install directory locked).
-Filename: "{cmd}"; Parameters: "/c ""{app}\Stop Claude Web.bat"""; Flags: runhidden; RunOnceId: "StopServer"
-
 [Code]
+// Stop the running server before touching any file.
+//
+// CloseApplications can only ASK an application to close, via Restart Manager.
+// This server is a detached, windowless Node process with no message loop, so
+// it never answers — and the files it holds open are node-pty's .node bindings,
+// which the default filter did not even look at. The result was an install that
+// replaced the small files and failed on the locked ones, leaving a package.json
+// claiming the new version on top of code that was still the old one. That build
+// then reports itself up to date forever, which is worse than failing outright.
+//
+// Returns True if it stopped something.
+function StopRunningServer(): Boolean;
+var
+  PidText: AnsiString;
+  Pid: String;
+  Code: Integer;
+begin
+  Result := False;
+  if not LoadStringFromFile(ExpandConstant('{app}\server.pid'), PidText) then
+    Exit;
+  Pid := Trim(String(PidText));
+  if Pid = '' then
+    Exit;
+  // /T takes the pty children with it; /F because nothing is listening for a
+  // polite close. The IMAGENAME filter is the guard against a stale pidfile
+  // whose number Windows has since recycled onto an unrelated process.
+  Exec(ExpandConstant('{sys}\taskkill.exe'),
+       '/PID ' + Pid + ' /T /F /FI "IMAGENAME eq node.exe"',
+       '', SW_HIDE, ewWaitUntilTerminated, Code);
+  // Give Windows a moment to release the handles before the copier starts.
+  Sleep(1500);
+  DeleteFile(ExpandConstant('{app}\server.pid'));
+  Result := True;
+end;
+
+// Runs after the wizard, before any file is written.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningServer();
+  // Never block the install on this: if there was nothing to stop, or the
+  // pidfile was stale, carrying on is still the right move.
+  Result := '';
+end;
+
+// Same problem on the way out — an uninstall can't remove files the server is
+// holding either.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    StopRunningServer();
+end;
+
 // Node is a runtime dependency, not something this installer bundles. Say so
 // clearly at install time rather than letting the app fail to start later.
 function NodeOnPath(): Boolean;

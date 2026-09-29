@@ -222,6 +222,22 @@ system, because the app runs as you and reads your `~/.claude`.
 `packaging/windows/claude-web-ui.iss` is the Inno Setup script. Per-user
 install (`PrivilegesRequired=lowest`) so there's no UAC prompt.
 
+It stops the running server itself, in `PrepareToInstall` (and again on
+uninstall), by taskkilling the pid in `{app}server.pid`. `CloseApplications`
+alone was not enough for two compounding reasons: Restart Manager only inspects
+the extensions in `CloseApplicationsFilter`, whose default `*.exe,*.dll,*.chm`
+never looked at the files this app actually holds open — node-pty's native
+`.node` bindings — and even with those listed it can only *ask* an app to
+close, which a detached windowless Node process never answers. The failure mode
+is worse than a refusal: the small files get replaced and the locked ones don't,
+leaving a `package.json` that claims the new version over old code, which then
+reports itself up to date forever. Verified by installing over a running server
+and checking a sentinel line in `server/index.js` was actually gone.
+
+Don't call `Stop Claude Web.bat` from the installer (or from any script): it
+ends with `pause`, so run hidden it waits forever for a keypress nobody can
+give it. The old `[UninstallRun]` entry did exactly that.
+
 `.github/workflows/release.yml` builds both on a v-tag and attaches them to a
 GitHub Release — which doubles as the update feed (see below).
 
