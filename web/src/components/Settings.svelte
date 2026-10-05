@@ -19,6 +19,43 @@
   // root folder, independent of any session's own cwd) ----
   let syncWorkDir = $state($config.syncWorkDir);
   let syncRepos = $state<SyncRepo[]>([...$config.syncRepos]);
+  // ---- scanning a folder for checkouts ----
+  // The repo list is a provisioning list — name, url, branch — and typing it out
+  // by hand is worst exactly when it matters most: a fresh machine with the
+  // projects already cloned. So offer to read them off the disk instead.
+  type Found = { name: string; path: string; url: string; branch: string; noRemote: boolean };
+  let scanPhase = $state<'idle' | 'scanning' | 'done'>('idle');
+  let scanMessage = $state('');
+  let scanFound = $state<Found[]>([]);
+  let scanPicked = $state<Record<string, boolean>>({});
+
+  // Already in the list, so it can be shown as such rather than offered again.
+  function alreadyListed(r: Found) {
+    return syncRepos.some((s) => s.url === r.url || s.name === r.name);
+  }
+  const scanAddable = $derived(scanFound.filter((r) => !r.noRemote && !alreadyListed(r)));
+  const scanPickedCount = $derived(scanAddable.filter((r) => scanPicked[r.url]).length);
+
+  function scanForRepos() {
+    const dir = syncWorkDir.trim();
+    if (!dir) { toast('set a workspace root folder first'); return; }
+    scanPhase = 'scanning';
+    scanMessage = '';
+    scanFound = [];
+    conn.send({ type: 'scanrepos', dir });
+  }
+
+  function addScanned() {
+    const picked = scanAddable.filter((r) => scanPicked[r.url]);
+    if (!picked.length) return;
+    syncRepos = [
+      ...syncRepos,
+      ...picked.map((r) => ({ name: r.name, url: r.url, branch: r.branch || '' })),
+    ];
+    toast(`added ${picked.length} repo${picked.length === 1 ? '' : 's'} — Save to keep them`);
+    scanPhase = 'idle';
+  }
+
   let newRepoName = $state('');
   let newRepoUrl = $state('');
   let newRepoBranch = $state('');
@@ -327,6 +364,14 @@
         updateUrl = m.url || '';
         updateLatest = m.latest || '';
         updatePhase = m.ok ? 'ok' : 'error';
+      } else if (m.type === 'scanrepos') {
+        scanPhase = 'done';
+        scanMessage = m.message || '';
+        scanFound = m.repos || [];
+        // Pre-tick everything worth adding: the common case is "yes, all of them".
+        const next: Record<string, boolean> = {};
+        for (const r of scanFound) if (!r.noRemote && !alreadyListed(r)) next[r.url] = true;
+        scanPicked = next;
       } else if (m.type === 'backupplan') {
         backupPlan = m.ok ? {
           sessionCount: m.sessionCount, totalBytes: m.totalBytes,
@@ -463,7 +508,46 @@
             placeholder="D:\Users\you\Documents\NocVault"
             bind:value={syncWorkDir}
           />
+          <div class="btn-row scan-row">
+            <button type="button" onclick={scanForRepos} disabled={scanPhase === 'scanning'}>
+              {scanPhase === 'scanning' ? 'Scanning…' : 'Scan folder for repos'}
+            </button>
+            <span class="hint inline">Reads the checkouts already in that folder.</span>
+          </div>
         </div>
+
+        {#if scanPhase === 'done'}
+          <div class="scan-result">
+            <div class="update-status">{scanMessage}</div>
+            {#if scanAddable.length}
+              <ul class="scan-list">
+                {#each scanAddable as r (r.url)}
+                  <li>
+                    <label class="check-row">
+                      <input type="checkbox" bind:checked={scanPicked[r.url]} />
+                      <span class="repo-name">{r.name}</span>
+                      <span class="repo-url">{r.url}{r.branch ? ` @ ${r.branch}` : ''}</span>
+                    </label>
+                  </li>
+                {/each}
+              </ul>
+              <div class="btn-row">
+                <button type="button" class="primary" onclick={addScanned} disabled={!scanPickedCount}>
+                  Add {scanPickedCount} to the list
+                </button>
+                <button type="button" onclick={() => (scanPhase = 'idle')}>Cancel</button>
+              </div>
+            {:else}
+              <p class="hint">
+                Nothing new to add — everything found is already listed, or has no
+                remote to clone from.
+              </p>
+              <div class="btn-row">
+                <button type="button" onclick={() => (scanPhase = 'idle')}>Close</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
 
         {#if syncRepos.length > 0}
           <div class="repo-list">
@@ -1118,6 +1202,34 @@
 
   .update-status.error {
     color: var(--danger);
+  }
+
+  .scan-row {
+    margin-top: 8px;
+    align-items: center;
+  }
+  .hint.inline {
+    margin: 0;
+  }
+  .scan-result {
+    margin: 10px 0 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .scan-list {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .scan-list .check-row {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 8px;
+    align-items: baseline;
+    padding: 3px 0;
   }
 
   .btn-row {

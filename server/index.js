@@ -17,7 +17,7 @@ const { WebSocketServer } = require('ws');
 const { CLAUDE } = require('./claude');
 const { loadConfig, saveConfig } = require('./config');
 const { listDir } = require('./fs');
-const { syncRepo, syncAllRepos, gitDiff } = require('./git');
+const { syncRepo, syncAllRepos, gitDiff, scanRepos } = require('./git');
 const { runUpdate } = require('./update');
 const { planBackup, createBackup, restoreBackup } = require('./backup');
 const { installMode } = require('./update');
@@ -253,6 +253,17 @@ wss.on('connection', (ws) => {
         saveConfig(cfg);
         // Keep every open tab in sync.
         broadcastConfig();
+        break;
+      }
+
+      case 'scanrepos': {
+        // Read-only: look at a folder and report the checkouts in it. The client
+        // decides what to do with them; nothing is saved here.
+        try {
+          send({ type: 'scanrepos', ...(await scanRepos(msg.dir)) });
+        } catch (err) {
+          send({ type: 'scanrepos', ok: false, message: err.message, repos: [] });
+        }
         break;
       }
 

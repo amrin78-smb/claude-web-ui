@@ -136,6 +136,63 @@ function collectGit(args, cwd) {
   });
 }
 
+// Find the git checkouts directly inside `dir`, so the workspace repo list can
+// be filled in from a machine that already has the projects — rather than typing
+// fifteen URLs by hand, which is exactly the moment that list matters least to
+// do slowly.
+//
+// One level deep on purpose: the workspace model is "a root with a project per
+// subfolder", and recursing would wander into node_modules and vendored repos.
+// `backup.js`'s gitInfo() answers a richer question (dirty/unpushed, for the
+// at-risk warning) but lives on the other side of this module's dependency, and
+// a picker does not need to know what is uncommitted — only what to clone.
+async function scanRepos(dir) {
+  if (!dir || !fs.existsSync(dir)) {
+    return { ok: false, message: `${dir || '(no folder)'} does not exist.`, repos: [] };
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch (err) {
+    return { ok: false, message: `Could not read ${dir}: ${err.message}`, repos: [] };
+  }
+
+  // Ask git about every candidate at once. These are two cheap commands each,
+  // and spawning serially across a few dozen folders is the slow part.
+  const found = await Promise.all(entries.map(async (e) => {
+    const full = path.join(dir, e.name);
+    if (!fs.existsSync(path.join(full, '.git'))) return null;
+    const [url, branch] = await Promise.all([
+      collectGit(['remote', 'get-url', 'origin'], full),
+      // --show-current, not rev-parse: a clone with no commits yet still has a
+      // branch, but rev-parse HEAD fails on it and would report no branch at all.
+      collectGit(['branch', '--show-current'], full),
+    ]);
+    const trimmed = String(url).trim();
+    // A checkout with no origin cannot be cloned back, so it is no use in a list
+    // whose whole purpose is cloning. Report it so the UI can say why.
+    return {
+      name: e.name,
+      path: full,
+      url: trimmed,
+      branch: String(branch).trim(),
+      noRemote: !trimmed,
+    };
+  }));
+
+  const repos = found.filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  const usable = repos.filter((r) => !r.noRemote).length;
+  return {
+    ok: true,
+    dir,
+    repos,
+    message: repos.length
+      ? `Found ${usable} repo${usable === 1 ? '' : 's'} in ${dir}` +
+        (usable < repos.length ? ` (${repos.length - usable} with no remote)` : '')
+      : `No git checkouts directly inside ${dir}.`,
+  };
+}
+
 async function gitDiff(cwd) {
   if (!fs.existsSync(path.join(cwd, '.git'))) {
     return { ok: true, isRepo: false, files: [], patch: '' };
@@ -177,4 +234,4 @@ async function gitDiff(cwd) {
   return { ok: true, isRepo: true, files, patch };
 }
 
-module.exports = { runGit, syncRepo, syncAllRepos, gitDiff };
+module.exports = { runGit, syncRepo, syncAllRepos, gitDiff, scanRepos };

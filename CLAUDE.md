@@ -41,6 +41,19 @@ is for whoever (human or Claude) is editing the code.
     always present, empty when nothing was asked for, so callers never guard on
     it. `/api/dirs` only forwards a short dot-prefixed extension — it reaches a
     filesystem listing, so it takes an extension, never a pattern.
+  - `git.js` also has `scanRepos(dir)`, which backs the "Scan folder for repos"
+    button: it lists the checkouts one level inside `dir` with their origin and
+    branch, so the workspace repo list can be filled from a machine that already
+    has the projects. One level deep on purpose — the workspace model is a root
+    with a project per subfolder, and recursing wanders into node_modules and
+    vendored checkouts. It uses `branch --show-current` rather than
+    `rev-parse --abbrev-ref HEAD`, which fails on a clone with no commits yet and
+    would report no branch at all. A checkout with no origin is listed with
+    `noRemote`, not dropped: it cannot be cloned back so it is no use in a
+    provisioning list, but hiding it leaves the count disagreeing with the rows
+    on screen. Note the list is curated, never a live view of the disk — nothing
+    rescans, so adding a repo later means scanning again or typing it in.
+
   - `backup.js` — backup/restore for moving to another machine. Two things
     travel together and only one is ours: app state (`config.json`,
     `sessions.json`) and the CLI's transcripts under
