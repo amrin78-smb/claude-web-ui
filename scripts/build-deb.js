@@ -113,8 +113,83 @@ function main() {
 
   // A launcher on PATH. Checks Node up front so a missing/old runtime produces
   // a sentence rather than a stack trace.
+  //
+  // Two subcommands are handled here rather than by the server:
+  //   open       wait for the server to answer, then open the UI window
+  //   autostart  on|off|status — the opt-in "open the UI when I log in"
+  // Opt-in, so nothing is written to anyone's ~/.config/autostart by dpkg.
+  // The service already starts the *server* before the desktop does; what a
+  // login was missing is the window, so that is all autostart adds. "on" also
+  // enables the service, because a window with no server behind it is just a
+  // connection-refused page.
+  //
+  // The probe uses node, not curl: node is a declared dependency, curl is not.
   const wrapper = `#!/bin/sh
 # Launcher for Claude Code Web UI (installed under ${INSTALL_DIR}).
+PORT="\${PORT:-4280}"
+URL="http://127.0.0.1:$PORT"
+AUTOSTART="\${XDG_CONFIG_HOME:-$HOME/.config}/autostart/claude-web-ui.desktop"
+
+up() {
+  node -e "require('http').get(process.argv[1], () => process.exit(0)).on('error', () => process.exit(1)).setTimeout(1000, function () { this.destroy(); })" "$URL" >/dev/null 2>&1
+}
+
+# A Chromium "app" window (no tab strip, own alt-tab entry), falling back to
+# the default browser. CLAUDE_WEB_BROWSER=tab forces an ordinary tab.
+open_ui() {
+  i=0
+  while [ $i -lt 120 ] && ! up; do sleep 0.5; i=$((i + 1)); done
+  if [ "\${CLAUDE_WEB_BROWSER:-app}" = "app" ]; then
+    for b in google-chrome google-chrome-stable brave-browser chromium chromium-browser; do
+      if command -v "$b" >/dev/null 2>&1; then
+        exec "$b" --app="$URL" >/dev/null 2>&1
+      fi
+    done
+  fi
+  exec xdg-open "$URL" >/dev/null 2>&1
+}
+
+case "$1" in
+  open)
+    command -v node >/dev/null 2>&1 || { echo "claude-web-ui: Node.js is required." >&2; exit 1; }
+    open_ui
+    ;;
+  autostart)
+    case "$2" in
+      on)
+        mkdir -p "$(dirname "$AUTOSTART")" || exit 1
+        cat > "$AUTOSTART" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Claude Code Web UI
+Comment=Open Claude Code Web UI at login
+Exec=/usr/bin/claude-web-ui open
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+        systemctl --user enable --now claude-web-ui.service || \\
+          echo "claude-web-ui: could not enable the user service; start the server yourself." >&2
+        echo "Autostart on: the server runs as a user service and the UI opens at login."
+        ;;
+      off)
+        rm -f "$AUTOSTART"
+        echo "Autostart off: the UI no longer opens at login."
+        echo "The server still starts with your session; to stop that too:"
+        echo "  systemctl --user disable --now claude-web-ui"
+        ;;
+      status|"")
+        if [ -f "$AUTOSTART" ]; then echo "UI at login: on"; else echo "UI at login: off"; fi
+        echo "Server service: $(systemctl --user is-enabled claude-web-ui.service 2>/dev/null || echo disabled)"
+        ;;
+      *)
+        echo "usage: claude-web-ui autostart [on|off|status]" >&2
+        exit 2
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+
 if ! command -v node >/dev/null 2>&1; then
   echo "claude-web-ui: Node.js is required but 'node' was not found on PATH." >&2
   echo "Install Node.js 18 or newer, then run this again." >&2
@@ -180,6 +255,7 @@ Description: Run Claude Code in your browser
  .
  Start it with "claude-web-ui", or enable the bundled user service:
  systemctl --user enable --now claude-web-ui
+ To also open the UI when you log in: claude-web-ui autostart on
 `);
 
   fs.writeFileSync(path.join(ctrl, 'postinst'),
@@ -223,6 +299,7 @@ if [ "$1" = "configure" ]; then
   echo "claude-web-ui installed to ${INSTALL_DIR}."
   echo "  Run it:        claude-web-ui        (then open http://127.0.0.1:4280)"
   echo "  Or as a service: systemctl --user enable --now claude-web-ui"
+  echo "  Open at login:   claude-web-ui autostart on   (service + UI window)"
   if ! command -v claude >/dev/null 2>&1; then
     echo
     echo "  Note: the Claude CLI was not found on PATH. Install it with:"

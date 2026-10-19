@@ -88,6 +88,23 @@ then run `update-desktop-database ~/.local/share/applications`. Copying that
 same `.desktop` file to `~/Desktop` and marking it executable gives you a
 desktop shortcut (GNOME/Zorin may ask you to *Allow Launching* on first click).
 
+### Installed from the .deb
+
+The package runs the server as a systemd **user** service and can open the UI
+for you when you log in. Both are opt-in:
+
+```bash
+claude-web-ui autostart on       # enable the service + open the UI at login
+claude-web-ui autostart status
+claude-web-ui autostart off      # stop opening the UI (the service stays on)
+claude-web-ui open               # open the UI now, once the server answers
+```
+
+The service already starts before your desktop does, so at login the window
+opens straight away. The first session you open after a reboot still takes a
+few seconds, because Claude itself starts then. Only the tab you open resumes,
+not all of them at once.
+
 ## Features
 
 - **Real terminal** — the full Claude Code TUI, right in the browser.
