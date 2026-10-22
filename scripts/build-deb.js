@@ -228,6 +228,10 @@ After=network.target
 Type=simple
 WorkingDirectory=${INSTALL_DIR}
 ExecStart=/usr/bin/claude-web-ui
+# Everything Claude runs (test runners, dev servers) lives in this unit, and
+# systemd's default OOMPolicy=stop tears the whole unit down when the kernel
+# OOM-kills any one of them, taking every session along. Kill only the culprit.
+OOMPolicy=continue
 Restart=on-failure
 RestartSec=3
 
