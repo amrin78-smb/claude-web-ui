@@ -70,6 +70,30 @@
   // rows are xterm's 80x24 defaults and must not be reported to the server.
   let fitted = false;
   let pasteTarget: HTMLTextAreaElement | null = null;
+  // >0 while replayed scrollback is being parsed (see the OSC 52 handler).
+  let replaying = 0;
+
+  // navigator.clipboard needs a secure context: fine on 127.0.0.1, absent when
+  // the UI is opened over plain http on a LAN address. execCommand('copy') is
+  // the fallback there; it needs a recent user gesture, which a key press or the
+  // mouse-up that ended a selection provides.
+  async function copyText(text: string) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      term?.focus();
+      if (!ok) { toast('copy failed — the browser blocked clipboard access'); return; }
+    }
+    toast('copied');
+  }
 
   // xterm owns a hidden <textarea> that intercepts paste (and right-click paste)
   // when the terminal has focus, calling preventDefault before it can bubble to
@@ -172,11 +196,48 @@
     // _keyDown BEFORE it preventDefaults, so a real `paste` event fires on the
     // textarea — which our image handler (below) and xterm's own text-paste
     // handler then receive. (Right-click paste already fires this event.)
+    //
+    // Copy: Ctrl+Shift+C copies the terminal selection (and must never fall
+    // through to Chrome, where it opens DevTools' element picker). Plain Ctrl+C
+    // copies too when there IS a selection — otherwise it stays ^C, interrupt.
+    // Note Claude's full-screen UI captures the mouse, so a plain drag selects
+    // inside Claude (which copies via OSC 52, below); Shift+drag makes an
+    // xterm selection instead.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey
           && e.key.toLowerCase() === 'v') {
         return false;
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'c') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          if (e.type === 'keydown' && term.hasSelection()) copyText(term.getSelection());
+          return false;
+        }
+        if (term.hasSelection()) {
+          e.preventDefault();
+          if (e.type === 'keydown') { copyText(term.getSelection()); term.clearSelection(); }
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // OSC 52: how a full-screen TUI asks the terminal to set the clipboard —
+    // Claude sends it when you select text inside its UI. xterm.js ignores it
+    // unless a handler is registered, which is why selecting in Claude copied
+    // nothing. Payload is "<targets>;<base64>"; "?" is a read request, which we
+    // refuse (a program reading your clipboard is not something to allow).
+    // Only for live output in the visible tab: replayed scrollback must not
+    // re-copy something from an hour ago on every reload.
+    term.parser.registerOscHandler(52, (data) => {
+      if (replaying > 0 || !active) return true;
+      const b64 = data.slice(data.indexOf(';') + 1);
+      if (!b64 || b64 === '?') return true;
+      try {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        copyText(new TextDecoder().decode(bytes));
+      } catch {}
       return true;
     });
 
@@ -186,8 +247,16 @@
     pasteTarget?.addEventListener('paste', onPaste, true);
 
     // Server output for THIS session only.
+    // xterm parses writes asynchronously and in order, so counting a replay
+    // until its write callback fires brackets exactly its own escape codes.
     unsubData = conn.on((m) => {
-      if (m.type === 'data' && m.id === session.id) term.write(m.data);
+      if (m.type !== 'data' || m.id !== session.id) return;
+      if (m.replay) {
+        replaying++;
+        term.write(m.data, () => { replaying--; });
+      } else {
+        term.write(m.data);
+      }
     });
 
     // Attach (replays scrollback buffer, then streams live). Re-attach on reconnect.

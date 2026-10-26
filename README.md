@@ -132,6 +132,10 @@ not all of them at once.
   it in a new session or the current one. Pin and reuse **recent folders** from
   the sidebar. The first time Claude opens a new folder it asks a "do you trust
   this folder?" question — just answer it like normal.
+- **📋 Copy** — select text inside Claude and it is copied for you. To select
+  terminal text yourself, **Shift+drag** (a plain drag goes to Claude, which
+  captures the mouse), then **Ctrl+Shift+C** — or **Ctrl+C**, which copies when
+  something is selected and interrupts as usual when nothing is.
 - **🖼 Paste image** — press **Ctrl+V** anywhere on the page with an image in
   your clipboard (e.g. a screenshot), or click the button to pick a file. The
   image is saved into `.claude-web-images/` inside the current folder and its

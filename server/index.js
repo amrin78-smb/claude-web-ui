@@ -205,8 +205,10 @@ wss.on('connection', (ws) => {
       case 'attach':
         // Replay scrollback to ONLY this socket, then live data flows via the
         // 'data' subscription above.
+        // `replay` lets the client tell history from live output — a clipboard
+        // write (OSC 52) in the scrollback must not fire again on every reload.
         sessions.attach(msg.id, msg.cols, msg.rows, (buffer) => {
-          send({ type: 'data', id: msg.id, data: buffer });
+          send({ type: 'data', id: msg.id, data: buffer, replay: true });
         });
         break;
 
