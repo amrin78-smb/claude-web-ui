@@ -51,8 +51,23 @@ app.use(express.json({ limit: '64mb' }));
 // In production the frontend is built to web/dist; serve it if present. In dev,
 // Vite serves the UI itself, so this simply does nothing.
 const distDir = path.join(__dirname, '..', 'web', 'dist');
+//
+// No ETag/Last-Modified, and index.html is never cached. The installers stamp
+// every file with the same date (the .deb uses mtime 0 so builds are
+// reproducible), and serve-static's ETag is just size + mtime. index.html is
+// the same size in every release, since only the equal-length asset hashes
+// change. So after an upgrade the browser asked "changed?", was told no, and
+// kept the old index.html pointing at assets that no longer exist: a blank
+// page. Hashed assets can be cached forever, because a new build gets new names.
 if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
+  app.use(express.static(distDir, {
+    etag: false,
+    lastModified: false,
+    setHeaders(res, file) {
+      const hashed = path.relative(distDir, file).split(path.sep)[0] === 'assets';
+      res.setHeader('Cache-Control', hashed ? 'public, max-age=31536000, immutable' : 'no-store');
+    },
+  }));
 }
 
 // List drives + immediate subfolders for the folder browser.

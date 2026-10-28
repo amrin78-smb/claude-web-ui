@@ -338,6 +338,8 @@ place_desktop_icons() {
   done
 }
 
+STARTED=$(date +%s)
+
 if [ "$1" = "configure" ]; then
   # On a fresh install, and on the upgrade that introduced the icon, but never
   # again: someone who deleted it does not want it back on every update.
@@ -351,11 +353,29 @@ if [ "$1" = "configure" ]; then
 
   # A server started by hand is not ours to kill, but the user should know
   # it is now stale rather than wonder why nothing changed.
-  if pgrep -f '${INSTALL_DIR}/server/index.js' >/dev/null 2>&1; then
-    echo
-    echo "  A claude-web-ui server is still running the previous version."
-    echo "  Restart it to pick up this one."
-  fi
+  # A server started by hand (menu entry, terminal) rather than the service.
+  # Find it by working directory: the wrapper cds into ${INSTALL_DIR} and runs
+  # "node server/index.js", so the command line never contains the install
+  # path and the old pgrep -f check never matched anything. Left alone it keeps
+  # serving the old code, and the browser shows the old version with no
+  # explanation, so stop it and bring the new one up as that user's service.
+  # Only processes older than this script: the service restarted above is new.
+  for pid in $(pgrep -f 'node server/index.js' 2>/dev/null); do
+    [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "${INSTALL_DIR}" ] || continue
+    age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -n "$age" ] && [ "$age" -gt "$(( $(date +%s) - STARTED ))" ] || continue
+    uid=$(stat -c %u "/proc/$pid")
+    uname=$(id -nu "$uid" 2>/dev/null) || continue
+    kill "$pid" 2>/dev/null || continue
+    i=0; while kill -0 "$pid" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
+    if runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user start claude-web-ui.service >/dev/null 2>&1; then
+      echo "  claude-web-ui: restarted $uname's server on the new version"
+    else
+      echo
+      echo "  Stopped $uname's claude-web-ui server (it was running the previous"
+      echo "  version). Start it again from the menu or with: claude-web-ui launch"
+    fi
+  done
 
   echo "claude-web-ui installed to ${INSTALL_DIR}."
   echo "  Run it:        claude-web-ui        (then open http://127.0.0.1:4280)"
