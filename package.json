@@ -1,6 +1,6 @@
 {
   "name": "claude-web-ui",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "private": true,
   "description": "Local web app that runs Claude Code in your browser",
   "main": "server/index.js",
