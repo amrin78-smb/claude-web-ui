@@ -19,7 +19,7 @@ const path = require('path');
 const cp = require('child_process');
 cp.execSync = vi.fn();
 const { execSync } = cp;
-const { findClaude, claudeProjectDir, hasClaudeHistory } = require('./claude');
+const { findClaude, claudeStatus, claudeProjectDir, hasClaudeHistory } = require('./claude');
 
 function setPlatform(value) {
   Object.defineProperty(process, 'platform', { value, configurable: true });
@@ -111,6 +111,37 @@ describe('findClaude', () => {
     });
     existsSyncSpy.mockImplementation((p) => p === viaShell);
     expect(findClaude()).toBe(viaShell);
+  });
+});
+
+describe('claudeStatus', () => {
+  let originalPlatform;
+  beforeEach(() => {
+    originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    setPlatform('linux');
+    execSync.mockReset();
+    execSync.mockImplementation(() => { throw new Error('not found'); });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(process, 'platform', originalPlatform);
+  });
+
+  it('reports not found, with an install command, when nothing resolves', () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    const s = claudeStatus();
+    expect(s.found).toBe(false);
+    expect(s.path).toBeNull();
+    expect(s.install).toMatch(/install/);
+  });
+
+  // The banner relies on this: installing Claude must flip it without a restart.
+  it('turns found as soon as claude appears, without a restart', () => {
+    const spy = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    expect(claudeStatus().found).toBe(false);
+    const localBin = path.join(os.homedir(), '.local', 'bin', 'claude');
+    spy.mockImplementation((p) => p === localBin);
+    expect(claudeStatus()).toMatchObject({ found: true, path: localBin });
   });
 });
 

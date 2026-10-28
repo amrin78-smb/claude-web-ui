@@ -16,6 +16,7 @@
   import FolderPicker from './components/FolderPicker.svelte';
   import Settings from './components/Settings.svelte';
   import Toasts from './components/Toasts.svelte';
+  import ClaudeMissing from './components/ClaudeMissing.svelte';
   import Icon from './components/Icon.svelte';
 
   let dragDepth = $state(0);
@@ -116,6 +117,7 @@
 <div class="layout">
   <Sidebar />
   <main>
+    <ClaudeMissing />
     <TopBar />
     <Tabs />
     <div class="body">

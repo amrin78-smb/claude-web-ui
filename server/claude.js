@@ -85,6 +85,18 @@ function onPath(name) {
   return (process.env.PATH || '').split(path.delimiter).some(d => d && fs.existsSync(path.join(d, name)));
 }
 
+// Whether Claude can actually be launched right now — what the UI's
+// "not installed" banner asks. Re-resolves, so it turns true as soon as the
+// user installs Claude, without a server restart.
+const INSTALL_COMMAND = process.platform === 'win32'
+  ? 'irm https://claude.ai/install.ps1 | iex'
+  : 'curl -fsSL https://claude.ai/install.sh | bash';
+function claudeStatus() {
+  const file = resolveClaude();
+  const found = path.isAbsolute(file) ? fs.existsSync(file) : onPath(file);
+  return { found, path: found ? file : null, install: INSTALL_COMMAND };
+}
+
 // Shown in the terminal instead of node-pty's "execvp(3) failed.: No such file
 // or directory", which tells nobody what to do.
 const NOT_FOUND = [
@@ -165,4 +177,4 @@ function spawnClaude(cwd, cols = 120, rows = 30, opts = {}) {
   );
 }
 
-module.exports = { get CLAUDE() { return CLAUDE; }, WEB_SYSTEM_PROMPT, spawnClaude, findClaude, hasClaudeHistory, claudeProjectDir };
+module.exports = { get CLAUDE() { return CLAUDE; }, claudeStatus, WEB_SYSTEM_PROMPT, spawnClaude, findClaude, hasClaudeHistory, claudeProjectDir };

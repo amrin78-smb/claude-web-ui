@@ -12,7 +12,8 @@ is for whoever (human or Claude) is editing the code.
 
 - `server/` — backend, plain Node CommonJS (no build step).
   - `index.js` — express + `ws` wiring. Serves `web/dist` in production, mounts
-    `GET /api/dirs` and `GET /api/plan-usage`, and owns the single `/ws`
+    `GET /api/dirs`, `GET /api/plan-usage` and `GET /api/claude` (is the CLI
+    installed? — drives the "Claude Code isn't installed" banner), and owns the single `/ws`
     WebSocket endpoint. Every ws connection is a *subscriber* to `sessionManager`
     — see the message protocol table in `REWRITE_SPEC.md` for the full
     client↔server message list.

@@ -14,7 +14,7 @@ const { spawn } = require('child_process');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
-const { CLAUDE } = require('./claude');
+const { CLAUDE, claudeStatus } = require('./claude');
 const { loadConfig, saveConfig } = require('./config');
 const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff, scanRepos } = require('./git');
@@ -71,6 +71,11 @@ app.get('/api/dirs', (req, res) => {
 
 // Account-wide plan usage (5-hour + weekly windows). Best-effort: this relies
 // on an undocumented Anthropic endpoint, so failures are reported, not fatal.
+// Is the Claude CLI installed and reachable? Polled by the UI's banner.
+app.get('/api/claude', (req, res) => {
+  res.json(claudeStatus());
+});
+
 app.get('/api/plan-usage', async (req, res) => {
   try {
     res.json(await getPlanUsage());
