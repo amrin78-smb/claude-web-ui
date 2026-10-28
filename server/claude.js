@@ -38,11 +38,67 @@ function findClaude() {
     }
   } catch {}
 
-  // 4) Bare name, let the shell resolve it at spawn time.
+  if (process.platform !== 'win32') {
+    // 4) Where the other installers put it. Matters because the server usually
+    // runs as a systemd user service or from a desktop launcher, whose PATH is
+    // the bare system one: an npm-global or nvm install is invisible to `which`
+    // there, and the session dies with node-pty's "execvp(3) failed".
+    const home = os.homedir();
+    const known = [
+      path.join(home, '.claude', 'local', 'claude'),
+      path.join(home, '.npm-global', 'bin', 'claude'),
+      path.join(home, '.bun', 'bin', 'claude'),
+      '/usr/local/bin/claude',
+      '/opt/homebrew/bin/claude',
+    ];
+    try {
+      const nvm = path.join(home, '.nvm', 'versions', 'node');
+      for (const v of fs.readdirSync(nvm).sort().reverse()) known.push(path.join(nvm, v, 'bin', 'claude'));
+    } catch {}
+    const hit = known.find(p => fs.existsSync(p));
+    if (hit) return hit;
+
+    // 5) The user's login shell knows their real PATH (nvm, custom prefixes).
+    try {
+      const out = execSync(`${process.env.SHELL || '/bin/sh'} -lc 'command -v claude'`,
+        { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+      const line = out.split(/\r?\n/).map(s => s.trim()).filter(Boolean).pop();
+      if (line && path.isAbsolute(line) && fs.existsSync(line)) return line;
+    } catch {}
+  }
+
+  // 6) Bare name, let the shell resolve it at spawn time.
   return process.platform === 'win32' ? 'claude.cmd' : 'claude';
 }
 
-const CLAUDE = findClaude();
+// Resolved once at load for the startup banner, and again at spawn time while
+// it is still unresolved (or the file has gone): installing Claude after the
+// server started should work from the next "Start Claude", not after a restart.
+let CLAUDE = findClaude();
+function resolveClaude() {
+  if (!path.isAbsolute(CLAUDE) || !fs.existsSync(CLAUDE)) CLAUDE = findClaude();
+  return CLAUDE;
+}
+
+// Whether a bare command name would resolve on this process's PATH.
+function onPath(name) {
+  return (process.env.PATH || '').split(path.delimiter).some(d => d && fs.existsSync(path.join(d, name)));
+}
+
+// Shown in the terminal instead of node-pty's "execvp(3) failed.: No such file
+// or directory", which tells nobody what to do.
+const NOT_FOUND = [
+  '',
+  '  \x1b[1;31mClaude Code CLI not found.\x1b[0m',
+  '',
+  '  This app runs the `claude` command, and it is not installed for this user',
+  '  (or not anywhere the server can see). Install it in a terminal with:',
+  '',
+  '    \x1b[1mcurl -fsSL https://claude.ai/install.sh | bash\x1b[0m',
+  '',
+  '  then run `claude` once to sign in, and click Start Claude here.',
+  '',
+].join('\r\n');
 
 // Scoped hint injected only into these web sessions (not global, not per-repo).
 // Copied VERBATIM from old server.js lines 25-36.
@@ -89,8 +145,15 @@ function spawnClaude(cwd, cols = 120, rows = 30, opts = {}) {
   const nodePath = [appNodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
   const args = ['--dangerously-skip-permissions', '--append-system-prompt', WEB_SYSTEM_PROMPT];
   if (opts.resume) args.unshift('--continue');
+  let file = resolveClaude();
+  if (process.platform !== 'win32' && !path.isAbsolute(file) && !onPath(file)) {
+    // Through the same pty, so the session's normal exit handling shows it.
+    file = '/bin/sh';
+    args.length = 0;
+    args.push('-c', 'printf "%s\\r\\n" "$0"; exit 127', NOT_FOUND);
+  }
   return pty.spawn(
-    CLAUDE,
+    file,
     args,
     {
       name: 'xterm-color',
@@ -102,4 +165,4 @@ function spawnClaude(cwd, cols = 120, rows = 30, opts = {}) {
   );
 }
 
-module.exports = { CLAUDE, WEB_SYSTEM_PROMPT, spawnClaude, findClaude, hasClaudeHistory, claudeProjectDir };
+module.exports = { get CLAUDE() { return CLAUDE; }, WEB_SYSTEM_PROMPT, spawnClaude, findClaude, hasClaudeHistory, claudeProjectDir };

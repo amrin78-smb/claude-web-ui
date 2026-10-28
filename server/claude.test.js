@@ -91,6 +91,27 @@ describe('findClaude', () => {
     execSync.mockImplementation(() => { throw new Error('not found'); });
     expect(findClaude()).toBe('claude');
   });
+
+  // A systemd user service gets the bare system PATH, so `which` misses an
+  // npm-global install and the session died with "execvp(3) failed".
+  it('on non-Windows, finds an npm-global install that `which` cannot see', () => {
+    setPlatform('linux');
+    const npmBin = path.join(os.homedir(), '.npm-global', 'bin', 'claude');
+    execSync.mockImplementation(() => { throw new Error('not found'); });
+    existsSyncSpy.mockImplementation((p) => p === npmBin);
+    expect(findClaude()).toBe(npmBin);
+  });
+
+  it("on non-Windows, falls back to the login shell's PATH (nvm and custom prefixes)", () => {
+    setPlatform('linux');
+    const viaShell = '/home/someone/.custom/bin/claude';
+    execSync.mockImplementation((cmd) => {
+      if (String(cmd).includes('-lc')) return 'motd noise\n' + viaShell + '\n';
+      throw new Error('not found');
+    });
+    existsSyncSpy.mockImplementation((p) => p === viaShell);
+    expect(findClaude()).toBe(viaShell);
+  });
 });
 
 describe('claudeProjectDir / hasClaudeHistory', () => {
