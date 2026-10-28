@@ -47,6 +47,10 @@ RestartApplications=no
 ; native .node bindings under node_modules. Without .node here the installer saw
 ; no conflict at all and cheerfully replaced everything it could reach.
 CloseApplicationsFilter=*.exe,*.dll,*.chm,*.node
+; The launcher is a .vbs, so a shortcut to it would otherwise wear the generic
+; script icon. claude-web-ui.ico is web/public/favicon.svg rendered by make-ico.py.
+SetupIconFile=claude-web-ui.ico
+UninstallDisplayIcon={app}\claude-web-ui.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -58,12 +62,13 @@ Name: "startup"; Description: "Start automatically when I sign in"; GroupDescrip
 [Files]
 ; The whole staged tree: server/, web/dist/, node_modules/, launchers, marker.
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "claude-web-ui.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
+Name: "{group}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\claude-web-ui.ico"
 Name: "{group}\Stop Claude Web"; Filename: "{app}\Stop Claude Web.bat"; WorkingDir: "{app}"
-Name: "{autodesktop}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{userstartup}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: startup
+Name: "{autodesktop}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\claude-web-ui.ico"; Tasks: desktopicon
+Name: "{userstartup}\Claude Web UI"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\claude-web-ui.ico"; Tasks: startup
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Start Claude Web UI now"; Flags: postinstall nowait shellexec skipifsilent

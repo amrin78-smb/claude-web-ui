@@ -105,6 +105,7 @@ function main() {
   fs.mkdirSync(path.join(root, 'usr', 'bin'), { recursive: true });
   fs.mkdirSync(path.join(root, 'usr', 'share', 'applications'), { recursive: true });
   fs.mkdirSync(path.join(root, 'usr', 'lib', 'systemd', 'user'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'usr', 'share', 'icons', 'hicolor', 'scalable', 'apps'), { recursive: true });
   fs.mkdirSync(ctrl, { recursive: true });
 
   // --- payload: the staged app, verbatim
@@ -150,6 +151,18 @@ open_ui() {
 }
 
 case "$1" in
+  launch)
+    # What the menu entry and desktop icon run: make sure a server is up, then
+    # open the window. Starting the server in the foreground (the old Exec)
+    # failed outright whenever the service already held the port.
+    command -v node >/dev/null 2>&1 || { echo "claude-web-ui: Node.js is required." >&2; exit 1; }
+    if ! up; then
+      if ! systemctl --user start claude-web-ui.service >/dev/null 2>&1; then
+        cd ${INSTALL_DIR} && nohup node server/index.js >/dev/null 2>&1 &
+      fi
+    fi
+    open_ui
+    ;;
   open)
     command -v node >/dev/null 2>&1 || { echo "claude-web-ui: Node.js is required." >&2; exit 1; }
     open_ui
@@ -210,11 +223,16 @@ exec node server/index.js "$@"
 Type=Application
 Name=Claude Code Web UI
 Comment=Run Claude Code in your browser
-Exec=/usr/bin/claude-web-ui
+Exec=/usr/bin/claude-web-ui launch
+Icon=claude-web-ui
 Terminal=false
 Categories=Development;
 Keywords=claude;ai;terminal;
 `);
+
+  // The menu entry and the desktop icon both use this.
+  fs.copyFileSync(path.join(stage, 'web', 'dist', 'favicon.svg'),
+    path.join(root, 'usr', 'share', 'icons', 'hicolor', 'scalable', 'apps', 'claude-web-ui.svg'));
 
   // A *user* service, not system-wide: the app runs as you, spawns Claude as
   // you, and reads your ~/.claude. Running it as root would be wrong.
@@ -286,7 +304,46 @@ for_each_running_user() {
   done
 }
 
+
+# Each real user's desktop folder (xdg-user-dir knows its localized name), but
+# only one that already exists: making a Desktop folder for an account that
+# has none is clutter, not an icon.
+desktop_dirs() {
+  getent passwd | while IFS=: read -r uname _ uid gid _ home _; do
+    [ "$uid" -ge 1000 ] 2>/dev/null && [ "$uid" -lt 60000 ] || continue
+    [ -d "$home" ] || continue
+    desk=$(runuser -u "$uname" -- env HOME="$home" xdg-user-dir DESKTOP 2>/dev/null || true)
+    [ -n "$desk" ] && [ "$desk" != "$home" ] || desk="$home/Desktop"
+    [ -d "$desk" ] && echo "$uname:$uid:$gid:$desk"
+  done
+}
+
+# A launcher on the desktop is only clickable once it is trusted: GNOME's
+# desktop wants metadata::trusted, XFCE (4.18+) a checksum of the file. Both are
+# per-user gvfs metadata, so they can only be set through that user's session
+# bus. Not logged in means no bus, and the first click asks once instead.
+place_desktop_icons() {
+  desktop_dirs | while IFS=: read -r uname uid gid desk; do
+    f="$desk/claude-web-ui.desktop"
+    [ -e "$f" ] && continue
+    install -m 755 -o "$uid" -g "$gid" /usr/share/applications/claude-web-ui.desktop "$f" || continue
+    if [ -S "/run/user/$uid/bus" ] && command -v gio >/dev/null 2>&1; then
+      sum=$(sha256sum "$f" | cut -d' ' -f1)
+      runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \\
+        gio set "$f" metadata::trusted true >/dev/null 2>&1 || true
+      runuser -u "$uname" -- env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \\
+        gio set -t string "$f" metadata::xfce-exe-checksum "$sum" >/dev/null 2>&1 || true
+    fi
+    echo "  desktop icon: $f"
+  done
+}
+
 if [ "$1" = "configure" ]; then
+  # On a fresh install, and on the upgrade that introduced the icon, but never
+  # again: someone who deleted it does not want it back on every update.
+  if [ -z "$2" ] || dpkg --compare-versions "$2" lt 2.5.0; then
+    place_desktop_icons
+  fi
   # Swapping the files does NOT change the server already running: Linux
   # replaces a file happily while a process holds it open, so the upgrade
   # "succeeds" and the user keeps talking to the old code. Restart it.
@@ -340,8 +397,28 @@ for_each_running_user() {
 # Only on real removal. During an upgrade the service should stay up and be
 # restarted by postinst once the new files are in place — stopping it here
 # would leave it down if the upgrade then failed.
+
+# Each real user's desktop folder (xdg-user-dir knows its localized name), but
+# only one that already exists: making a Desktop folder for an account that
+# has none is clutter, not an icon.
+desktop_dirs() {
+  getent passwd | while IFS=: read -r uname _ uid gid _ home _; do
+    [ "$uid" -ge 1000 ] 2>/dev/null && [ "$uid" -lt 60000 ] || continue
+    [ -d "$home" ] || continue
+    desk=$(runuser -u "$uname" -- env HOME="$home" xdg-user-dir DESKTOP 2>/dev/null || true)
+    [ -n "$desk" ] && [ "$desk" != "$home" ] || desk="$home/Desktop"
+    [ -d "$desk" ] && echo "$uname:$uid:$gid:$desk"
+  done
+}
+
 if [ "$1" = "remove" ]; then
   for_each_running_user stop
+  # Take our desktop icon with us, but only if it is still ours unchanged — a
+  # copy the user edited is theirs now.
+  desktop_dirs | while IFS=: read -r uname uid gid desk; do
+    f="$desk/claude-web-ui.desktop"
+    cmp -s "$f" /usr/share/applications/claude-web-ui.desktop && rm -f "$f"
+  done
 fi
 exit 0
 `, { mode: 0o755 });

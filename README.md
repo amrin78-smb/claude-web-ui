@@ -90,8 +90,14 @@ desktop shortcut (GNOME/Zorin may ask you to *Allow Launching* on first click).
 
 ### Installed from the .deb
 
-The package runs the server as a systemd **user** service and can open the UI
-for you when you log in. Both are opt-in:
+Installing puts a **Claude Code Web UI** icon on your desktop and in the app
+menu. Clicking it starts the server if it isn't running, then opens the window.
+The icon is placed once, so if you delete it, it stays deleted after upgrades.
+GNOME and XFCE may ask you to trust the launcher on the first click if you weren't
+logged in while it was installed.
+
+The package can also run the server as a systemd **user** service and open the
+UI for you when you log in. Both are opt-in:
 
 ```bash
 claude-web-ui autostart on       # enable the service + open the UI at login
