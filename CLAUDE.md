@@ -343,6 +343,18 @@ creating the windows costs far more than the commands. Every git spawn here sets
 caught by measuring from a test harness: node attached to a console creates no
 windows either way, so it only shows up when the server runs windowless.
 
+**Under a systemd user unit, respawn-and-exit does not work**, and for a long
+time the Linux dev box updated, built, and then stayed down. The replacement is
+spawned into the unit's cgroup, and when the main process exits 0 systemd stops
+the unit and kills everything left in it; `Restart=on-failure` doesn't fire for
+a clean exit. So when `systemdUserUnit()` (in `update.js`, from
+`/proc/self/cgroup` + `INVOCATION_ID`) names a unit *and* this process is that
+unit's `MainPID`, the restart is `systemctl --user --no-block restart <unit>`
+instead. The MainPID check matters: anything started from inside a session (a
+test server, say) inherits the unit's cgroup and environment, and without it an
+update there would restart the real service and every session in it. The .deb
+never reaches this path, because packaged installs only check the release feed.
+
 Restarting drops every live PTY (sessions come back as resumable "stopped"
 ghosts, same as any server restart — no Claude conversation history is lost,
 that's stored by the CLI itself under `~/.claude/projects`). Because this app

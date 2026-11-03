@@ -171,4 +171,24 @@ async function runUpdate(onData, opts = {}) {
   return { ok: true, message: 'Update complete', shouldRestart: true };
 }
 
-module.exports = { runUpdate, runCmd, installMode, compareVersions, checkRelease };
+// The systemd *user* unit this server runs as, or null. Restarting by spawning a
+// replacement and exiting cannot work there: the replacement lands in the same
+// cgroup, and when the main process exits 0 systemd stops the unit and kills
+// everything left in it — Restart=on-failure doesn't fire for a clean exit. So
+// the app pulled, built, and then stayed down. Under a user unit the restart has
+// to be systemd's own. `cgroup` and `env` are injectable for the tests.
+function systemdUserUnit(cgroup, env = process.env) {
+  if (!env.INVOCATION_ID) return null;
+  try {
+    if (cgroup === undefined) cgroup = fs.readFileSync('/proc/self/cgroup', 'utf8');
+  } catch {
+    return null;
+  }
+  for (const line of String(cgroup).split('\n')) {
+    const m = line.match(/\/user@\d+\.service\/(?:.*\/)?([^/]+\.service)\s*$/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+module.exports = { runUpdate, runCmd, installMode, compareVersions, checkRelease, systemdUserUnit };

@@ -122,3 +122,25 @@ describe('runUpdate', () => {
     expect(spawn).toHaveBeenCalledTimes(2);
   });
 });
+
+// Restarting by respawn-and-exit left a systemd-managed install down after an
+// update; systemdUserUnit() is what routes that case through systemctl instead.
+describe('systemdUserUnit', () => {
+  const { systemdUserUnit } = require('./update');
+  const env = { INVOCATION_ID: 'abc' };
+
+  it('names the user unit from a cgroup v2 path', () => {
+    const cg = '0::/user.slice/user-1000.slice/user@1000.service/app.slice/claude-web-ui.service\n';
+    expect(systemdUserUnit(cg, env)).toBe('claude-web-ui.service');
+  });
+
+  it('is null outside systemd, even inside a user session cgroup', () => {
+    const cg = '0::/user.slice/user-1000.slice/user@1000.service/app.slice/vte-spawn-1.scope\n';
+    expect(systemdUserUnit(cg, env)).toBeNull();
+    expect(systemdUserUnit('0::/user.slice/user@1000.service/app.slice/x.service\n', {})).toBeNull();
+  });
+
+  it('is null for a system unit, which `systemctl --user` cannot restart', () => {
+    expect(systemdUserUnit('0::/system.slice/claude-web-ui.service\n', env)).toBeNull();
+  });
+});

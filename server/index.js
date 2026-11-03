@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
@@ -18,7 +18,7 @@ const { CLAUDE, claudeStatus } = require('./claude');
 const { loadConfig, saveConfig } = require('./config');
 const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff, scanRepos } = require('./git');
-const { runUpdate } = require('./update');
+const { runUpdate, systemdUserUnit } = require('./update');
 const { planBackup, createBackup, restoreBackup } = require('./backup');
 const { installMode } = require('./update');
 const sessions = require('./sessionManager');
@@ -470,15 +470,35 @@ wss.on('connection', (ws) => {
         if (restarting) {
           // Give the client a moment to receive 'updatedone' before the socket drops.
           setTimeout(() => {
-            try {
-              spawn(process.execPath, [path.join(__dirname, 'index.js')], {
-                cwd: path.join(__dirname, '..'),
-                detached: true,
-                stdio: 'ignore',
-                env: process.env,
-              }).unref();
-            } catch {}
-            shutdown();
+            const respawn = () => {
+              try {
+                spawn(process.execPath, [path.join(__dirname, 'index.js')], {
+                  cwd: path.join(__dirname, '..'),
+                  detached: true,
+                  stdio: 'ignore',
+                  env: process.env,
+                  windowsHide: true,
+                }).unref();
+              } catch {}
+              shutdown();
+            };
+            // Only the unit's own main process may restart it. A server started
+            // from inside a session (a test copy, say) inherits the unit's cgroup
+            // and environment, and must not take the real one down with it.
+            const unit = systemdUserUnit();
+            let mainPid = 0;
+            if (unit) {
+              try {
+                mainPid = Number(execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', unit],
+                  { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim());
+              } catch {}
+            }
+            if (!unit || mainPid !== process.pid) return respawn();
+            // --no-block: the job is queued with systemd before systemctl exits,
+            // so it survives systemd stopping us (and this child) to carry it out.
+            const sc = spawn('systemctl', ['--user', '--no-block', 'restart', unit], { stdio: 'ignore', windowsHide: true });
+            sc.on('error', respawn);
+            sc.on('exit', code => { if (code !== 0) respawn(); });
           }, 500);
         }
         break;
