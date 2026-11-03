@@ -82,15 +82,18 @@
   let syncAllPhase = $state<SyncAllPhase>('idle');
   let syncAllLog = $state('');
   let syncAllMessage = $state('');
+  // The one repo being synced, or null for the whole list.
+  let syncOne = $state<string | null>(null);
 
-  function runSyncAll() {
+  function runSyncAll(name: string | null = null) {
     // Persist whatever's currently in the form first, so a repo you just
     // added (but haven't hit "Save" for) is included in this run.
     saveConfig({ syncWorkDir: syncWorkDir.trim(), syncRepos });
     syncAllLog = '';
     syncAllMessage = '';
+    syncOne = name;
     syncAllPhase = 'running';
-    conn.send({ type: 'syncall' });
+    conn.send(name ? { type: 'syncall', name } : { type: 'syncall' });
   }
 
   function closeSyncAllPanel() {
@@ -398,6 +401,7 @@
         if (m.ok && m.reloaded) restoreMessage += ' Session list reloaded — no restart needed.';
         else if (m.ok) restoreMessage += ' Restart the app to pick up the restored sessions.';
       } else if (m.type === 'syncallstart') {
+        syncOne = m.name ?? null;
         syncAllLog = '';
         syncAllMessage = '';
         syncAllPhase = 'running';
@@ -406,7 +410,7 @@
       } else if (m.type === 'syncalldone') {
         syncAllMessage = m.message || '';
         syncAllPhase = m.ok ? 'ok' : 'error';
-        if (m.ok) toast('workspace repos synced');
+        if (m.ok) toast(syncOne ? `${syncOne} synced` : 'workspace repos synced');
       }
     });
     return conn.onStatus((s) => (connStatus = s));
@@ -497,7 +501,8 @@
         <div class="hint">
           Clone/pull a fixed list of repos into their own folders under one root — for
           syncing several repos at once before you start work, independent of any open
-          session.
+          session. The <Icon name="refresh" size={11} /> on a repo syncs just that one.
+          Pulls are fast-forward only, so local commits are never overwritten.
         </div>
 
         <div class="field">
@@ -557,6 +562,16 @@
                   <span class="repo-name">{repo.name}</span>
                   <span class="repo-url">{repo.url}{repo.branch ? ` @ ${repo.branch}` : ''}</span>
                 </div>
+                <button
+                  type="button"
+                  class="icon-btn"
+                  onclick={() => runSyncAll(repo.name)}
+                  disabled={syncAllPhase !== 'idle'}
+                  title="Sync only {repo.name}"
+                  aria-label="Sync {repo.name}"
+                >
+                  <Icon name="refresh" size={14} />
+                </button>
                 <button type="button" class="icon-btn" onclick={() => removeSyncRepo(i)} aria-label="Remove repo">
                   <Icon name="x" size={14} />
                 </button>
@@ -575,7 +590,7 @@
         </div>
 
         <div class="field">
-          <button type="button" onclick={runSyncAll} disabled={syncAllPhase !== 'idle'}>
+          <button type="button" onclick={() => runSyncAll()} disabled={syncAllPhase !== 'idle'}>
             Sync all repos
           </button>
         </div>
@@ -990,7 +1005,7 @@
     <div class="modal update-modal">
       <h3>
         {#if syncAllPhase === 'running'}
-          Syncing workspace repos…
+          {syncOne ? `Syncing ${syncOne}…` : 'Syncing workspace repos…'}
         {:else if syncAllPhase === 'ok'}
           Sync complete
         {:else}
@@ -1001,10 +1016,10 @@
         {#if syncAllPhase === 'running'}
           <div class="update-status">
             <span class="spin"><Icon name="refresh" size={14} /></span>
-            Cloning/pulling each repo…
+            {syncOne ? 'Cloning/pulling…' : 'Cloning/pulling each repo…'}
           </div>
         {:else if syncAllPhase === 'ok'}
-          <div class="update-status">All repos synced.</div>
+          <div class="update-status">{syncOne ? `${syncOne} synced.` : 'All repos synced.'}</div>
         {:else}
           <div class="update-status error">
             {syncAllMessage || 'Sync failed.'} Check the log below for which repo(s) failed.

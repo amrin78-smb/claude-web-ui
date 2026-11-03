@@ -316,9 +316,17 @@ wss.on('connection', (ws) => {
         // configured list of repos into their own subfolders of syncWorkDir.
         // Modeled on the 'sync'/'update' handlers above, but for many repos
         // at once instead of one session's cwd or the app's own root.
+        // `name` narrows it to one repo, for when the others hold local work
+        // that isn't ready to be pulled over.
         const cfg = loadConfig();
-        send({ type: 'syncallstart' });
-        const r = await syncAllRepos(cfg.syncWorkDir, cfg.syncRepos, d => send({ type: 'syncalllog', data: d }));
+        const repos = msg.name ? cfg.syncRepos.filter(r => r.name === msg.name) : cfg.syncRepos;
+        send({ type: 'syncallstart', name: msg.name || null });
+        if (msg.name && repos.length === 0) {
+          send({ type: 'syncalllog', data: `No repo named "${msg.name}" in the workspace list.\n` });
+          send({ type: 'syncalldone', ok: false, message: 'repo not found' });
+          break;
+        }
+        const r = await syncAllRepos(cfg.syncWorkDir, repos, d => send({ type: 'syncalllog', data: d }));
         send({ type: 'syncalldone', ok: r.ok, message: r.message });
         break;
       }
