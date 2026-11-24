@@ -18,6 +18,7 @@ const { CLAUDE, claudeStatus, readCliVersion } = require('./claude');
 const bridge = require('./bridge');
 const { loadConfig, saveConfig, normalizeRemote } = require('./config');
 const remoteAccess = require('./remoteAccess');
+const push = require('./push');
 const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff, scanRepos } = require('./git');
 const { runUpdate, systemdUserUnit } = require('./update');
@@ -126,6 +127,25 @@ app.get('/api/sessions/:id/images/:img', (req, res) => {
     'Cache-Control': 'private, max-age=86400, immutable',
   });
   res.end(img.bytes);
+});
+
+// ---- Web Push (push.js): subscribe this device, and a test button ----------
+app.get('/api/push/key', (req, res) => res.json({ publicKey: push.publicKey() }));
+app.post('/api/push/subscribe', (req, res) => {
+  const body = req.body || {};
+  const r = push.subscribe(body.subscription, body.label);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+app.post('/api/push/unsubscribe', (req, res) => res.json(push.unsubscribe(String((req.body || {}).endpoint || ''))));
+app.post('/api/push/status', (req, res) => res.json({ subscribed: push.isSubscribed(String((req.body || {}).endpoint || '')) }));
+app.post('/api/push/test', async (req, res) => {
+  const endpoint = String((req.body || {}).endpoint || '');
+  if (!push.isSubscribed(endpoint)) return res.status(404).json({ ok: false, error: 'this device is not subscribed' });
+  const r = await push.notify(
+    { kind: 'test', title: 'Claude Code', body: 'Push notifications work on this device.', tag: 'test' },
+    { cfg: loadConfig(), endpoint },
+  );
+  res.json({ ok: r.sent > 0, ...r });
 });
 
 app.get('/api/plan-usage', async (req, res) => {
@@ -616,6 +636,19 @@ wss.on('connection', (ws) => {
 // Rehydrate any sessions left open when the server last shut down. They come
 // back as 'stopped' ghosts; the user resumes them (with prior context) on demand.
 const restored = sessions.restore();
+
+// Push the two alerts worth a buzz to every subscribed device. Server-wide,
+// not per socket: the whole point is reaching devices with no page open.
+sessions.on('idle', ({ id, title, preview }) => {
+  push.notify({ kind: 'idle', session: id, tag: `s${id}`, title: `Claude finished — ${title}`, body: preview || '' }, { cfg: loadConfig() });
+});
+sessions.on('attention', ({ id, title, kind, text }) => {
+  push.notify({
+    kind: 'attention', session: id, tag: `s${id}`,
+    title: `Claude needs you — ${title}`,
+    body: kind === 'plan' ? 'Plan ready for review' : (text || 'Claude has a question'),
+  }, { cfg: loadConfig() });
+});
 
 bridge.configure({ port: PORT });
 readCliVersion(v => console.log(`  Claude CLI: ${v || 'version unknown'} · live status ${bridge.enabled() ? 'on' : 'off'}`));

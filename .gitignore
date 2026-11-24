@@ -11,6 +11,8 @@ dist-pkg/
 config.json
 sessions.json
 server.pid
+# Web Push keys (the private VAPID key) and this machine's subscriptions
+push.json
 .claude-web-images/
 .claude-web-files/
 

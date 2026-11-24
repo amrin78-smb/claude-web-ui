@@ -154,6 +154,12 @@ not all of them at once.
   installable app (Chrome/Edge: the install icon in the address bar; iPhone:
   Share → Add to Home Screen), and on a touch screen a key bar adds the keys a
   phone keyboard lacks: Esc, Tab, Shift+Tab, arrows, Ctrl+C and Enter.
+- **📲 Push notifications** — **Settings → Notifications → Turn on push on
+  this device**, once per device. Then "Claude needs you" and "Claude
+  finished" alerts arrive even with the app closed, including on your phone;
+  tapping one opens that session. On iPhone/iPad this works in the installed
+  app only (Share → Add to Home Screen first). Alert text is encrypted end to
+  end, so the push service (Google/Apple/Mozilla/Microsoft) can't read it.
 - **Multiple projects at once** — a **sidebar** of projects/sessions and a **tab
   bar** let you run several Claude sessions in different folders side by side and
   switch instantly.

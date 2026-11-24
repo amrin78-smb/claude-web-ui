@@ -4,6 +4,7 @@
   import { theme, fontSize, type Theme } from '../stores/theme';
   import { showSettings, toast } from '../stores/ui';
   import { notificationsEnabled, soundEnabled, requestNotifications } from '../lib/notify';
+  import { pushState, enablePush, disablePush, testPush } from '../lib/push';
   import { conn, type ConnStatus } from '../lib/connection';
   import { sessions } from '../stores/sessions';
   import Icon from './Icon.svelte';
@@ -14,6 +15,15 @@
   let branch = $state($config.branch);
   let autoSync = $state($config.autoSync);
   let autoResume = $state($config.autoResume);
+
+  async function togglePush() {
+    const err = $pushState === 'on' ? (await disablePush(), null) : await enablePush();
+    toast(err ? `push: ${err}` : $pushState === 'on' ? 'push notifications on for this device' : 'push notifications off for this device');
+  }
+  async function sendTestPush() {
+    const err = await testPush();
+    toast(err ? `push: ${err}` : 'test sent — it should arrive in a few seconds');
+  }
 
   // ---- remote access through a Cloudflare Tunnel + Access (remoteAccess.js) ----
   let remoteHost = $state($config.remote?.hostname ?? '');
@@ -649,6 +659,31 @@
             Desktop notification when a session finishes
           </label>
           <div class="hint">Lets a background session tell you it's done, even in another tab.</div>
+        </div>
+
+        <div class="field">
+          <div class="btn-row">
+            <button type="button" onclick={togglePush}
+              disabled={$pushState === 'busy' || $pushState === 'unsupported' || $pushState === 'needs-install' || $pushState === 'denied'}>
+              {$pushState === 'on' ? 'Turn off push on this device' : 'Turn on push on this device'}
+            </button>
+            {#if $pushState === 'on'}
+              <button type="button" onclick={sendTestPush}>Send a test</button>
+            {/if}
+          </div>
+          <div class="hint">
+            {#if $pushState === 'on'}
+              On: "needs you" and "finished" alerts reach this device even when the app is closed.
+            {:else if $pushState === 'needs-install'}
+              On iPhone and iPad, push only works in the installed app: Share → Add to Home Screen, then open it from there and turn this on.
+            {:else if $pushState === 'denied'}
+              This browser has notifications blocked for this site. Allow them in the site settings (the icon left of the address), then reload.
+            {:else if $pushState === 'unsupported'}
+              This browser doesn't support push notifications.
+            {:else}
+              Alerts reach this device even when the app is closed — your phone included. Each device turns this on for itself.
+            {/if}
+          </div>
         </div>
 
         <div class="field">

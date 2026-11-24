@@ -1,6 +1,6 @@
 {
   "name": "claude-web-ui",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "private": true,
   "description": "Local web app that runs Claude Code in your browser",
   "main": "server/index.js",
@@ -19,6 +19,7 @@
     "@lydell/node-pty": "^1.2.0-beta.12",
     "express": "^5.2.1",
     "pptxgenjs": "^4.0.1",
+    "web-push": "3.6.7",
     "ws": "^8.21.0",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1"

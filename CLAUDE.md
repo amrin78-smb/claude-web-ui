@@ -205,6 +205,26 @@ is for whoever (human or Claude) is editing the code.
     the same way if it changes. `KeyBar.svelte` shows on `(pointer: coarse)`
     only and sends on pointerdown with preventDefault so the terminal keeps
     focus (otherwise each tap closes the phone keyboard).
+  - `push.js` — Web Push, so "needs you" / "finished" reach a phone with the
+    app closed. Uses `web-push` (pinned 3.6.7; 4.0 was days old) for RFC 8291
+    encryption + VAPID — the payload is end-to-end encrypted, so push vendors
+    never see titles or replies. `push.json` in STATE_DIR holds the key pair
+    (made once: new keys orphan every subscription) and the subscriptions.
+    Endpoints are allowlisted to the four real push services, because we POST
+    wherever a browser says and an open list would be an SSRF primitive. 404/410
+    from a service drops that subscription. The VAPID subject is the remote
+    origin, never the user's email (it goes to every push vendor). `index.js`
+    pushes on the sessionManager `idle`/`attention` events, server-wide.
+
+    Client side (`web/src/lib/push.ts`, Settings → Notifications) is per device
+    and per origin. `public/sw.js` skips a non-test push while a window is
+    focused (the page shows its own toast), except on Safari/iOS, which may
+    revoke a subscription whose pushes show nothing. While push is on, the
+    page's own `new Notification` is skipped (`pushIsOn()`), or a hidden tab
+    would double every alert. Tapping an alert opens `/?session=<id>` or
+    messages an open window. Testing: headless/automated Chrome usually can't
+    *receive* from FCM (the server send still returns 201), so drive the
+    service worker with CDP `ServiceWorker.deliverPushMessage` instead.
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.
@@ -258,7 +278,8 @@ belongs to a *session's* folder, not here, so it is unaffected.
 
 ## Local runtime state (gitignored, machine-specific — never commit)
 
-`config.json`, `sessions.json`, `server.pid`, `.claude-web-images/`,
+`config.json`, `sessions.json`, `server.pid`, `push.json` (holds the private
+VAPID key), `.claude-web-images/`,
 `.claude-web-files/`, `node_modules/`, `web/dist/`. These hold this machine's
 folder paths, open sessions, and installed deps — none of it is portable
 across machines and none of it belongs in the repo.

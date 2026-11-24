@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { conn } from './connection';
 import { activeId, setActive } from '../stores/sessions';
 import { toast } from '../stores/ui';
+import { pushIsOn } from './push';
 
 const storedNotifications = localStorage.getItem('notifications') === '1';
 const storedSound = localStorage.getItem('soundEnabled') === '1';
@@ -56,6 +57,7 @@ export function notifyIdle(opts: { id: string; title: string; preview: string; a
   pendingCount.update((n) => n + 1);
 
   if (
+    !pushIsOn() &&
     get(notificationsEnabled) &&
     typeof Notification !== 'undefined' &&
     Notification.permission === 'granted'
@@ -89,6 +91,7 @@ export function notifyAttention(opts: { id: string; title: string; kind: string;
   pendingCount.update((n) => n + 1);
 
   if (
+    !pushIsOn() &&
     get(notificationsEnabled) &&
     typeof Notification !== 'undefined' &&
     Notification.permission === 'granted'
