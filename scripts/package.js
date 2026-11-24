@@ -101,6 +101,12 @@ function main() {
     filter: (src) => !src.endsWith('.test.js'),
   });
   fs.cpSync(path.join(APP_ROOT, 'web', 'dist'), path.join(outDir, 'web', 'dist'), { recursive: true });
+  // The bridge mod every session loads (server/bridge.js). Not the types and
+  // tsconfig Claude Code writes into it in a dev checkout; those are editor aids.
+  fs.cpSync(path.join(APP_ROOT, 'mod'), path.join(outDir, 'mod'), {
+    recursive: true,
+    filter: (src) => !/[\\/]\.claude-plugin[\\/]types([\\/]|$)/.test(src) && !src.endsWith('tsconfig.json'),
+  });
 
   for (const name of [...(LAUNCHERS[spec.os] || []), ...SHARED]) {
     const src = path.join(APP_ROOT, name);

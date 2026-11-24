@@ -30,6 +30,19 @@ function lastLine(buffer) {
   return line.length > 120 ? line.slice(0, 120) + '…' : line;
 }
 
+// Collapse an answer to one short line for the notification preview.
+function oneLine(text) {
+  const line = String(text || '').replace(/\s+/g, ' ').trim();
+  return line.length > 120 ? line.slice(0, 120) + '…' : line;
+}
+
+// Bridge-reported state, reset whenever the pty is replaced or exits: it
+// describes one Claude process, and the next one reports afresh (or never, on
+// a CLI without mods — which leaves the output timer in charge, as before).
+function blankBridge() {
+  return { bridged: false, activity: null, waiting: null, context: null, cost: null };
+}
+
 // Where the open-session list is persisted so it survives a SERVER restart (not
 // just a page reload). We store only metadata (id/cwd/title) — never the live
 // pty — and rehydrate them as 'stopped' ghosts the user can resume.
@@ -64,10 +77,17 @@ class SessionManager extends EventEmitter {
   // prior Claude conversation exists for this folder that `--continue` can reopen.
   // `busy` is true while output is actively streaming since the user's last
   // prompt; `usage`/`preview` are refreshed each time a session goes idle.
+  //
+  // The rest comes from the bridge mod (see bridge.js) and is null until it
+  // reports: `activity` is 'working' | 'waiting' | 'idle', `waiting` says what
+  // Claude is waiting on ({kind: 'question'|'plan', text}), `context` is the
+  // window's fill and `cost` the session's estimated spend in USD.
   _wire(s) {
     return {
       id: s.id, cwd: s.cwd, title: s.title, status: s.status, resumable: !!s.resumable,
       busy: !!s.busy, usage: s.usage || null, preview: s.preview || '',
+      bridged: !!s.bridged, activity: s.activity || null, waiting: s.waiting || null,
+      context: s.context || null, cost: s.cost ?? null,
     };
   }
 
@@ -88,7 +108,9 @@ class SessionManager extends EventEmitter {
       // reference to its dead pty (onExit only flips status), so `pty` would
       // still be truthy for a ghost. This also matches what the client filters on.
       if (s.status === 'stopped') continue;
-      (s.busy ? busy : idle).push({ id: s.id, title: s.title });
+      // Waiting on the person is mid-turn too: a restart throws away the
+      // question and the turn it belongs to, not just scrollback.
+      (s.busy || s.activity === 'waiting' ? busy : idle).push({ id: s.id, title: s.title });
     }
     return { busy, idle };
   }
@@ -138,6 +160,7 @@ class SessionManager extends EventEmitter {
         busy: false,
         usage: null,
         preview: '',
+        ...blankBridge(),
         _idleTimer: null,
         _sawInput: false,
       });
@@ -157,6 +180,9 @@ class SessionManager extends EventEmitter {
     }
     this.emit('data', { id: session.id, data });
 
+    // Once the mod reports, busy follows its turn events instead: output
+    // stops during a long quiet tool call, and a question is not "done".
+    if (session.bridged) return;
     if (!session.busy) {
       this._setBusy(session, true);
       this._emitSession(session);
@@ -168,6 +194,7 @@ class SessionManager extends EventEmitter {
   // Transition a session from busy back to idle: refresh usage/preview and,
   // only if the user prompted it since the last idle, announce completion.
   _goIdle(session) {
+    if (session.bridged) return;
     this._setBusy(session, false);
     session.usage = readUsage(session.cwd);
     session.preview = lastLine(session.buffer);
@@ -176,6 +203,59 @@ class SessionManager extends EventEmitter {
       session._sawInput = false;
       this.emit('idle', { id: session.id, title: session.title, preview: session.preview });
     }
+  }
+
+  // Apply one event from the session's bridge mod (already parsed by
+  // bridge.parseEvent). Returns false for a session we don't have, or one with
+  // no live pty — a late post from a process we already replaced.
+  bridgeEvent(id, ev) {
+    const s = this.sessions.get(id);
+    if (!s || !s.pty || s.status === 'stopped') return false;
+    if (!s.bridged) {
+      // The output timer may still be counting down from startup output;
+      // from here on the mod decides, so stop it flipping busy behind us.
+      s.bridged = true;
+      clearTimeout(s._idleTimer);
+      this._setBusy(s, false);
+      s.activity = 'idle';
+    }
+    switch (ev.type) {
+      case 'turn.start':
+      case 'answered':
+        s.activity = 'working';
+        s.waiting = null;
+        this._setBusy(s, true);
+        break;
+      case 'ask':
+        s.activity = 'waiting';
+        s.waiting = { kind: ev.kind, text: ev.text };
+        // Nothing runs while it waits, so don't hold the machine awake.
+        this._setBusy(s, false);
+        this.emit('attention', { id: s.id, title: s.title, kind: ev.kind, text: ev.text });
+        break;
+      case 'turn.complete': {
+        s.activity = 'idle';
+        s.waiting = null;
+        this._setBusy(s, false);
+        s.usage = readUsage(s.cwd);
+        s.preview = oneLine(ev.answer) || lastLine(s.buffer);
+        s._sawInput = false;
+        // Esc means the person is right there; anything else (an answer, an
+        // API error) is worth telling them about.
+        if (ev.reason !== 'aborted') {
+          this.emit('idle', { id: s.id, title: s.title, preview: s.preview });
+        }
+        break;
+      }
+      case 'measure':
+        if (ev.context && ev.context.window) s.context = ev.context;
+        if (ev.cost != null) s.cost = ev.cost;
+        break;
+      default:
+        break;
+    }
+    this._emitSession(s);
+    return true;
   }
 
   // Broadcast a session metadata change (status/cwd/title).
@@ -203,6 +283,7 @@ class SessionManager extends EventEmitter {
       this._emitData(session, notice);
       clearTimeout(session._idleTimer);
       this._setBusy(session, false);
+      Object.assign(session, blankBridge());
       session.status = 'stopped';
       // Recheck now that Claude has actually run — a transcript may exist even
       // though _spawn() unconditionally set resumable=false at launch time.
@@ -223,13 +304,14 @@ class SessionManager extends EventEmitter {
     clearTimeout(session._idleTimer);
     this._setBusy(session, false);
     session._sawInput = false;
+    Object.assign(session, blankBridge());
     session.resumable = false;
     session.status = 'starting';
     this._emitSession(session);
 
     let thisPty;
     try {
-      thisPty = spawnClaude(session.cwd, cols, rows, { resume });
+      thisPty = spawnClaude(session.cwd, cols, rows, { resume, sessionId: session.id });
     } catch (err) {
       const notice = `\r\n\x1b[31m[failed to launch Claude: ${err.message}]\x1b[0m\r\n`;
       this._emitData(session, notice);
@@ -262,6 +344,7 @@ class SessionManager extends EventEmitter {
       busy: false,
       usage: null,
       preview: '',
+      ...blankBridge(),
       _idleTimer: null,
       _sawInput: false,
     };

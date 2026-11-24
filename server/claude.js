@@ -6,8 +6,9 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
 const pty = require('@lydell/node-pty');
+const bridge = require('./bridge');
 
 // ---- locate the Claude CLI launcher -------------------------------------
 function findClaude() {
@@ -153,9 +154,12 @@ function hasClaudeHistory(cwd) {
 // Spawn Claude Code in `cwd` at the given terminal size. Returns the pty.
 // `opts.resume` adds `--continue`, which reopens the most recent conversation
 // in that folder instead of starting a fresh one — the "session memory" path.
+// `opts.sessionId` is this app's session id, which the bridge mod reports back
+// under (see bridge.js); without one the session launches without the mod.
 function spawnClaude(cwd, cols = 120, rows = 30, opts = {}) {
   const nodePath = [appNodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
-  const args = ['--dangerously-skip-permissions', '--append-system-prompt', WEB_SYSTEM_PROMPT];
+  const link = bridge.launchFor(opts.sessionId);
+  const args = ['--dangerously-skip-permissions', '--append-system-prompt', WEB_SYSTEM_PROMPT, ...link.args];
   if (opts.resume) args.unshift('--continue');
   let file = resolveClaude();
   if (process.platform !== 'win32' && !path.isAbsolute(file) && !onPath(file)) {
@@ -172,9 +176,22 @@ function spawnClaude(cwd, cols = 120, rows = 30, opts = {}) {
       cols,
       rows,
       cwd,
-      env: { ...process.env, FORCE_COLOR: '3', NODE_PATH: nodePath },
+      env: { ...process.env, FORCE_COLOR: '3', NODE_PATH: nodePath, ...link.env },
     }
   );
 }
 
-module.exports = { get CLAUDE() { return CLAUDE; }, claudeStatus, WEB_SYSTEM_PROMPT, spawnClaude, findClaude, hasClaudeHistory, claudeProjectDir };
+// Read `claude --version` in the background, for bridge.enabled(). Async on
+// purpose: the first run of a fresh CLI install can take seconds, and nothing
+// should wait on it — until it answers, the bridge assumes a current CLI.
+function readCliVersion(cb = () => {}) {
+  const file = resolveClaude();
+  if (!path.isAbsolute(file) && !onPath(file)) return cb(null);
+  // A .cmd shim needs a shell on Windows; quote it, since the path may hold spaces.
+  exec(`"${file}" --version`, { timeout: 15000, windowsHide: true }, (err, stdout) => {
+    if (!err) bridge.setCliVersion(stdout);
+    cb(err ? null : String(stdout).trim());
+  });
+}
+
+module.exports = { readCliVersion, get CLAUDE() { return CLAUDE; }, claudeStatus, WEB_SYSTEM_PROMPT, spawnClaude, findClaude, hasClaudeHistory, claudeProjectDir };

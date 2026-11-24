@@ -1,0 +1,6 @@
+{
+  "name": "web-ui-bridge",
+  "version": "1.0.0",
+  "description": "Reports session state (turns, questions, context, cost) to the Claude Code Web UI that launched this session.",
+  "license": "MIT"
+}

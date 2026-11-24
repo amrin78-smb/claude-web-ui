@@ -24,7 +24,33 @@ export type Session = {
   usage?: Usage | null;
   // Last non-empty line of output, refreshed whenever the session goes idle.
   preview?: string;
+  // Reported by the bridge mod inside the session's Claude process; null (or
+  // absent, from an older server) until it reports, and on a CLI without mods.
+  bridged?: boolean;
+  activity?: 'working' | 'waiting' | 'idle' | null;
+  waiting?: { kind: 'question' | 'plan'; text: string } | null;
+  context?: { tokens?: number; window: number; percent?: number } | null;
+  cost?: number | null;
 };
+
+// One word for what a session is doing, for dots and tooltips. Bridge state
+// wins when there is any; otherwise it is the old output-timer guess.
+export function activityOf(s: Session): 'stopped' | 'starting' | 'working' | 'waiting' | 'idle' {
+  if (s.status === 'stopped') return 'stopped';
+  if (s.status === 'starting') return 'starting';
+  if (s.activity) return s.activity;
+  return s.busy ? 'working' : 'idle';
+}
+
+// Hover text for a session's dot: what it is doing, and what it waits on.
+export function activityLabel(s: Session): string {
+  const a = activityOf(s);
+  if (a === 'waiting') {
+    const what = s.waiting?.kind === 'plan' ? 'Waiting for you to review the plan' : 'Waiting for your answer';
+    return s.waiting?.text && s.waiting.kind !== 'plan' ? `${what}: ${s.waiting.text}` : what;
+  }
+  return { stopped: 'Stopped', starting: 'Starting', working: 'Working', idle: 'Idle' }[a];
+}
 
 export const sessions = writable<Session[]>([]);
 export const activeId = writable<string>('');

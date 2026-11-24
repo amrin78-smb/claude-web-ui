@@ -129,7 +129,7 @@ describe('SessionManager', () => {
     claude.spawnClaude.mockReturnValueOnce(fakePty()).mockReturnValueOnce(fakePty());
     const wire = sessions.create('C:\\proj', 80, 24);
     sessions.resume(wire.id, 80, 24);
-    expect(claude.spawnClaude).toHaveBeenLastCalledWith('C:\\proj', 80, 24, { resume: true });
+    expect(claude.spawnClaude).toHaveBeenLastCalledWith('C:\\proj', 80, 24, { resume: true, sessionId: wire.id });
   });
 
   it('attach() replays the scrollback buffer and resizes the pty', () => {
@@ -257,6 +257,94 @@ describe('SessionManager', () => {
       pty._emitExit(0);
 
       expect(sessions.activeSessions()).toEqual({ busy: [], idle: [] });
+    });
+  });
+  describe('bridge events', () => {
+    function bridged() {
+      const pty = fakePty();
+      claude.spawnClaude.mockReturnValue(pty);
+      const wire = sessions.create(PROJ, 80, 24);
+      return { pty, id: wire.id };
+    }
+
+    it('passes the session id to spawnClaude so the mod can report under it', () => {
+      const { id } = bridged();
+      expect(claude.spawnClaude.mock.calls[0][3]).toMatchObject({ sessionId: id });
+    });
+
+    it('turn.start/complete drive busy instead of the output timer', () => {
+      vi.useFakeTimers();
+      const { pty, id } = bridged();
+      sessions.bridgeEvent(id, { type: 'start' });
+      sessions.bridgeEvent(id, { type: 'turn.start' });
+      expect(sessions.list()[0]).toMatchObject({ bridged: true, activity: 'working', busy: true });
+
+      // A long quiet tool call: output stops, but the turn isn't over.
+      pty._emitData('running tests');
+      vi.advanceTimersByTime(60000);
+      expect(sessions.list()[0].busy).toBe(true);
+
+      const onIdle = vi.fn();
+      sessions.on('idle', onIdle);
+      sessions.bridgeEvent(id, { type: 'turn.complete', reason: 'answer', answer: 'All 12 tests\npass.' });
+      expect(sessions.list()[0]).toMatchObject({ activity: 'idle', busy: false, preview: 'All 12 tests pass.' });
+      expect(onIdle).toHaveBeenCalledWith({ id, title: 'proj', preview: 'All 12 tests pass.' });
+    });
+
+    it('a startup idle timer still counting down cannot flip a bridged turn idle', () => {
+      vi.useFakeTimers();
+      const { pty, id } = bridged();
+      pty._emitData('banner');            // starts the 1.5s idle timer
+      sessions.bridgeEvent(id, { type: 'turn.start' });
+      vi.advanceTimersByTime(5000);
+      expect(sessions.list()[0].busy).toBe(true);
+    });
+
+    it('does not announce a turn the person interrupted with Esc', () => {
+      const { id } = bridged();
+      const onIdle = vi.fn();
+      sessions.on('idle', onIdle);
+      sessions.bridgeEvent(id, { type: 'turn.start' });
+      sessions.bridgeEvent(id, { type: 'turn.complete', reason: 'aborted', answer: '' });
+      expect(onIdle).not.toHaveBeenCalled();
+    });
+
+    it('a question marks the session waiting, raises attention, and counts as busy for a restart', () => {
+      const { id } = bridged();
+      const onAttention = vi.fn();
+      sessions.on('attention', onAttention);
+      sessions.bridgeEvent(id, { type: 'turn.start' });
+      sessions.bridgeEvent(id, { type: 'ask', kind: 'question', text: 'Tea or coffee?' });
+
+      expect(sessions.list()[0]).toMatchObject({ activity: 'waiting', busy: false, waiting: { kind: 'question', text: 'Tea or coffee?' } });
+      expect(onAttention).toHaveBeenCalledWith({ id, title: 'proj', kind: 'question', text: 'Tea or coffee?' });
+      expect(sessions.activeSessions().busy).toEqual([{ id, title: 'proj' }]);
+
+      sessions.bridgeEvent(id, { type: 'answered' });
+      expect(sessions.list()[0]).toMatchObject({ activity: 'working', busy: true, waiting: null });
+    });
+
+    it('measure records context and cost', () => {
+      const { id } = bridged();
+      sessions.bridgeEvent(id, { type: 'measure', context: { tokens: 300000, window: 1000000, percent: 30 }, cost: 1.25 });
+      expect(sessions.list()[0]).toMatchObject({ context: { percent: 30, window: 1000000 }, cost: 1.25 });
+    });
+
+    it('a respawn forgets the previous process\'s bridge state', () => {
+      const { id } = bridged();
+      sessions.bridgeEvent(id, { type: 'turn.start' });
+      sessions.bridgeEvent(id, { type: 'measure', context: { percent: 30, window: 1000 }, cost: 2 });
+      claude.spawnClaude.mockReturnValue(fakePty());
+      sessions.restart(id, 80, 24);
+      expect(sessions.list()[0]).toMatchObject({ bridged: false, activity: null, context: null, cost: null, busy: false });
+    });
+
+    it('ignores events for unknown or stopped sessions', () => {
+      const { pty, id } = bridged();
+      expect(sessions.bridgeEvent('nope', { type: 'turn.start' })).toBe(false);
+      pty._emitExit(0);
+      expect(sessions.bridgeEvent(id, { type: 'turn.start' })).toBe(false);
+      expect(sessions.list()[0].busy).toBe(false);
     });
   });
 });

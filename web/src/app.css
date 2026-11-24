@@ -11,6 +11,7 @@
   --muted: #9b938a;
   --danger: #d05050;
   --ok: #5fbf6b;
+  --warn: #e0a83a;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-fast: 0.15s;
@@ -28,6 +29,7 @@
   --muted: #7c736a;
   --danger: #c0392b;
   --ok: #3f9d4a;
+  --warn: #b7791f;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
 }
 

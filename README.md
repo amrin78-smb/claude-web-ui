@@ -127,6 +127,16 @@ not all of them at once.
   when Claude actually has saved history for that folder.) Also available in the
   ⌘K palette as **Resume last conversation**. The open-session list is stored in
   `sessions.json` in the app folder.
+- **Live session status** — each session's dot says what Claude is actually
+  doing: **working** (pulsing), **waiting for you** (amber, when Claude has asked
+  a question or has a plan for you to review) or **idle** (green). The sidebar
+  shows how full each session's **context** is (amber from 60%, red from 80%,
+  so you know when to compact) and the overview shows each conversation's
+  estimated **cost**. With notifications on, you hear about a finished turn and,
+  separately, about a question that is blocking a session. This comes from a
+  small built-in Claude Code mod in `mod/` that every session loads; it needs
+  Claude Code 2.1.287 or newer, and older versions fall back to guessing from
+  terminal output, as before. Set `CLAUDE_WEB_UI_NO_MOD=1` to turn it off.
 - **Multiple projects at once** — a **sidebar** of projects/sessions and a **tab
   bar** let you run several Claude sessions in different folders side by side and
   switch instantly.

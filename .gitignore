@@ -29,3 +29,7 @@ Thumbs.db
 
 # Logs
 npm-debug.log*
+
+# Types Claude Code writes into a mod folder it loads with --plugin-dir
+mod/.claude-plugin/types/
+mod/tsconfig.json

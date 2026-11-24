@@ -14,7 +14,8 @@ const { spawn, execFileSync } = require('child_process');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
-const { CLAUDE, claudeStatus } = require('./claude');
+const { CLAUDE, claudeStatus, readCliVersion } = require('./claude');
+const bridge = require('./bridge');
 const { loadConfig, saveConfig } = require('./config');
 const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff, scanRepos } = require('./git');
@@ -89,6 +90,16 @@ app.get('/api/dirs', (req, res) => {
 // Is the Claude CLI installed and reachable? Polled by the UI's banner.
 app.get('/api/claude', (req, res) => {
   res.json(claudeStatus());
+});
+
+// Events from each session's bridge mod (see bridge.js). The token is what
+// makes this ours: it is minted per run and only reaches ptys we spawned, and a
+// web page can't send the custom header without a preflight we never answer.
+app.post('/api/bridge', (req, res) => {
+  if (!bridge.authorized(req.get('x-claude-web-ui-token'))) return res.status(403).end();
+  const ev = bridge.parseEvent(req.body);
+  if (!ev) return res.status(400).end();
+  res.json({ ok: sessions.bridgeEvent(ev.session, ev) });
 });
 
 app.get('/api/plan-usage', async (req, res) => {
@@ -189,12 +200,14 @@ wss.on('connection', (ws) => {
   const onSession = ({ session }) => send({ type: 'session', session });
   const onClosed = ({ id }) => send({ type: 'closed', id });
   const onIdle = ({ id, title, preview }) => send({ type: 'idle', id, title, preview });
+  const onAttention = ({ id, title, kind, text }) => send({ type: 'attention', id, title, kind, text });
   // A restore replaces the whole session list; push the new one to every tab.
   const onReloaded = ({ sessions: list }) => send({ type: 'sessions', sessions: list });
   sessions.on('data', onData);
   sessions.on('session', onSession);
   sessions.on('closed', onClosed);
   sessions.on('idle', onIdle);
+  sessions.on('attention', onAttention);
   sessions.on('reloaded', onReloaded);
 
   // Tell the tab what it's connected to. Sent unprompted because it can't
@@ -555,6 +568,7 @@ wss.on('connection', (ws) => {
     sessions.off('session', onSession);
     sessions.off('closed', onClosed);
     sessions.off('idle', onIdle);
+    sessions.off('attention', onAttention);
     sessions.off('reloaded', onReloaded);
   });
 });
@@ -562,6 +576,9 @@ wss.on('connection', (ws) => {
 // Rehydrate any sessions left open when the server last shut down. They come
 // back as 'stopped' ghosts; the user resumes them (with prior context) on demand.
 const restored = sessions.restore();
+
+bridge.configure({ port: PORT });
+readCliVersion(v => console.log(`  Claude CLI: ${v || 'version unknown'} · live status ${bridge.enabled() ? 'on' : 'off'}`));
 
 // Self-update spawns the new process before the old one has necessarily
 // released the port (see 'update' handler above), so a fresh EADDRINUSE is

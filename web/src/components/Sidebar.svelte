@@ -2,7 +2,7 @@
   import StatusDot from './StatusDot.svelte';
   import Icon from './Icon.svelte';
   import PlanUsage from './PlanUsage.svelte';
-  import { sessions, activeId, createSession, closeSession, setActive } from '../stores/sessions';
+  import { sessions, activeId, createSession, closeSession, setActive, activityLabel } from '../stores/sessions';
   import { config, togglePinned } from '../stores/config';
   import { openFolderPicker } from '../stores/ui';
 
@@ -69,8 +69,16 @@
           title={s.cwd}
           onclick={() => setActive(s.id)}
         >
-          <StatusDot status={s.status} size={8} />
+          <StatusDot status={s.status} activity={s.activity ?? (s.busy ? 'working' : null)} title={activityLabel(s)} size={8} />
           <span class="label">{s.title}</span>
+          {#if s.context?.percent != null}
+            <span
+              class="ctx"
+              class:warm={s.context.percent >= 60}
+              class:hot={s.context.percent >= 80}
+              title={`Context used: ${s.context.percent}% of ${Math.round(s.context.window / 1000)}k tokens`}
+            >{s.context.percent}%</span>
+          {/if}
           <button
             class="ghost icon close"
             title="Close session"
@@ -187,6 +195,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .ctx {
+    flex: none;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+  }
+  .ctx.warm { color: var(--warn); }
+  .ctx.hot { color: var(--danger); }
+  .row:hover .ctx { display: none; }
 
   .icon {
     flex: none;

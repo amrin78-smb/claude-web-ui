@@ -4,6 +4,7 @@
   import { sessions, activeId, setActive, closeSession, restartSession } from '../stores/sessions';
   import { showDashboard } from '../stores/ui';
   import type { Session } from '../stores/sessions';
+  import { activityLabel } from '../stores/sessions';
 
   function basename(path: string): string {
     return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -13,9 +14,17 @@
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
   }
 
-  function usageLabel(u: NonNullable<Session['usage']>): string {
-    const total = u.input + u.output + u.cacheRead + u.cacheCreation;
-    return `$${u.costUSD.toFixed(2)} · ${formatTokens(total)} tok`;
+  // Cost from the bridge when it has reported (the CLI's own /cost figure),
+  // else the transcript estimate. Context fill beats a raw token total when
+  // known: "how close is this to compacting" is the question people ask.
+  function usageLabel(s: Session): string {
+    const u = s.usage;
+    const cost = s.cost ?? u?.costUSD;
+    const parts: string[] = [];
+    if (cost) parts.push(`$${cost.toFixed(2)}`);
+    if (s.context?.percent != null) parts.push(`${s.context.percent}% context`);
+    else if (u) parts.push(`${formatTokens(u.input + u.output + u.cacheRead + u.cacheCreation)} tok`);
+    return parts.join(' · ');
   }
 
   function open(id: string) {
@@ -47,20 +56,24 @@
         >
           <div class="row top">
             <div class="status">
-              <StatusDot status={s.status} size={9} />
-              {#if s.busy}
+              <StatusDot status={s.status} activity={s.activity ?? (s.busy ? 'working' : null)} title={activityLabel(s)} size={9} />
+              {#if s.activity === 'waiting'}
+                <span class="waiting">Needs you</span>
+              {:else if s.busy}
                 <span class="busy" title="Working"></span>
               {/if}
             </div>
-            {#if s.usage}
-              <span class="badge">{usageLabel(s.usage)}</span>
+            {#if usageLabel(s)}
+              <span class="badge" title="Estimated cost of this conversation">{usageLabel(s)}</span>
             {/if}
           </div>
 
           <div class="title">{s.title}</div>
           <div class="cwd">{basename(s.cwd)}</div>
 
-          {#if s.preview}
+          {#if s.activity === 'waiting' && s.waiting}
+            <div class="preview asking">{s.waiting.kind === 'plan' ? 'Plan ready for review' : s.waiting.text}</div>
+          {:else if s.preview}
             <div class="preview">{s.preview}</div>
           {/if}
 
@@ -167,6 +180,15 @@
     align-items: center;
     gap: 6px;
   }
+  .waiting {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--warn);
+  }
+  .preview.asking {
+    color: var(--text);
+  }
+
   .busy {
     width: 6px;
     height: 6px;

@@ -77,3 +77,39 @@ conn.on((m) => {
     notifyIdle({ id: m.id, title: m.title, preview: m.preview, active });
   }
 });
+
+// Claude asked something (or has a plan ready) and is blocked until answered.
+// Unlike "finished", this is worth saying even when the tab is merely hidden
+// behind another window: the session makes no progress until someone looks.
+export function notifyAttention(opts: { id: string; title: string; kind: string; text: string; active: boolean }): void {
+  if (opts.active) return;
+  const what = opts.kind === 'plan' ? 'has a plan for you to review' : 'has a question';
+
+  toast('❓ ' + opts.title + ' ' + what);
+  pendingCount.update((n) => n + 1);
+
+  if (
+    get(notificationsEnabled) &&
+    typeof Notification !== 'undefined' &&
+    Notification.permission === 'granted'
+  ) {
+    const n = new Notification('Claude needs you — ' + opts.title, {
+      body: opts.kind === 'plan' ? 'Plan ready for review' : opts.text,
+      requireInteraction: true,
+    });
+    n.onclick = () => {
+      setActive(opts.id);
+      window.focus();
+      n.close();
+    };
+  }
+
+  if (get(soundEnabled)) playBeep();
+}
+
+conn.on((m) => {
+  if (m.type === 'attention') {
+    const active = get(activeId) === m.id && document.visibilityState === 'visible' && document.hasFocus();
+    notifyAttention({ id: m.id, title: m.title, kind: m.kind, text: m.text, active });
+  }
+});

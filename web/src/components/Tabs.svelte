@@ -1,7 +1,7 @@
 <script lang="ts">
   import StatusDot from './StatusDot.svelte';
   import Icon from './Icon.svelte';
-  import { sessions, activeId, closeSession, setActive } from '../stores/sessions';
+  import { sessions, activeId, closeSession, setActive, activityLabel } from '../stores/sessions';
   import { openFolderPicker, showDashboard } from '../stores/ui';
 </script>
 
@@ -14,7 +14,7 @@
         title={s.cwd}
         onclick={() => setActive(s.id)}
       >
-        <StatusDot status={s.status} size={7} />
+        <StatusDot status={s.status} activity={s.activity ?? (s.busy ? 'working' : null)} title={activityLabel(s)} size={7} />
         <span class="label">{s.title}</span>
         <button
           class="ghost close"

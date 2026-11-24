@@ -139,6 +139,34 @@ is for whoever (human or Claude) is editing the code.
     user action and left them stuck. Since the filename is then ours rather than
     theirs, `createBackup()` returns `dest` and names it in the message; don't
     reduce that to "backup complete".
+  - `bridge.js` + `mod/` — live session state. Everything else here sees a
+    session only as terminal output, which can't tell "thinking quietly
+    through a 20-second build" from "done", or "done" from "asked you a
+    question". So every session is launched with `--plugin-dir <app>/mod`, a
+    Claude Code *mod* (hooks module running inside the CLI, 2.1.287+) that
+    POSTs `turn.start` / `turn.complete` / `ask` / `answered` / `measure`
+    (context fill + cost) to `/api/bridge`. `sessionManager.bridgeEvent()` takes
+    over `busy` from the output timer once the first event arrives (and kills
+    any idle timer still counting down from startup output, or it would flip a
+    live turn idle); `_spawn` and pty exit reset it, since the state describes
+    one process. A CLI without mods never reports, so the old timer stays in
+    charge — that fallback is the reason the timer code is still there.
+
+    Auth is a per-run token passed in the pty's env
+    (`CLAUDE_WEB_UI_BRIDGE`/`_SESSION`/`_TOKEN`); a page can't send the custom
+    header without a CORS preflight we never answer. Bash children inherit the
+    token, so `parseEvent()` still treats bodies as input. Only the main loop
+    reports (`agentId` undefined) — a subagent finishing is not the session
+    going idle. "Waiting" counts as busy for the update warning: a restart
+    throws away the question and its turn.
+
+    Testing the mod: `claude plugin validate ./mod`, then a real run — `claude
+    -p "…" --plugin-dir ./mod` with the three env vars pointed at a throwaway
+    listener shows every post. A Claude started from inside a session inherits
+    `CLAUDE_CODE_CHILD_SESSION` and saves no transcript; unset it for isolated
+    server tests or "resume" finds nothing. The CLI writes `types/` and
+    `tsconfig.json` into the mod folder when it loads it (gitignored, and
+    filtered out by `package.js`); from a read-only `/opt` it just doesn't.
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.
