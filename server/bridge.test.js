@@ -52,3 +52,21 @@ describe('bridge', () => {
       .toEqual({ type: 'turn.complete', session: 'a', reason: 'answer', answer: '' });
   });
 });
+
+describe('bridge images', () => {
+  const png = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
+
+  it('accepts raster images and decodes them', () => {
+    const ev = bridge.parseEvent({ type: 'image', session: 'a', tool: 'mcp__playwright__browser_take_screenshot', mediaType: 'image/png', data: png });
+    expect(ev.mediaType).toBe('image/png');
+    expect(ev.bytes.equals(Buffer.from('89504e470d0a1a0a', 'hex'))).toBe(true);
+    expect(ev.tool).toBe('mcp__playwright__browser_take_screenshot');
+  });
+
+  it('refuses SVG, unknown types, empty and oversized data', () => {
+    expect(bridge.parseEvent({ type: 'image', session: 'a', mediaType: 'image/svg+xml', data: png })).toBeNull();
+    expect(bridge.parseEvent({ type: 'image', session: 'a', mediaType: 'text/html', data: png })).toBeNull();
+    expect(bridge.parseEvent({ type: 'image', session: 'a', mediaType: 'image/png', data: '' })).toBeNull();
+    expect(bridge.parseEvent({ type: 'image', session: 'a', mediaType: 'image/png', data: 'A'.repeat(13 * 1024 * 1024) })).toBeNull();
+  });
+});

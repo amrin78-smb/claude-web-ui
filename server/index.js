@@ -102,6 +102,20 @@ app.post('/api/bridge', (req, res) => {
   res.json({ ok: sessions.bridgeEvent(ev.session, ev) });
 });
 
+// A picture the bridge forwarded (see sessionManager 'image'). Same posture as
+// the rest of /api: the server only listens on 127.0.0.1. The type was checked
+// on the way in (never SVG), and nosniff keeps the browser to it.
+app.get('/api/sessions/:id/images/:img', (req, res) => {
+  const img = sessions.image(req.params.id, req.params.img);
+  if (!img) return res.status(404).end();
+  res.set({
+    'Content-Type': img.mediaType,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, max-age=86400, immutable',
+  });
+  res.end(img.bytes);
+});
+
 app.get('/api/plan-usage', async (req, res) => {
   try {
     res.json(await getPlanUsage());

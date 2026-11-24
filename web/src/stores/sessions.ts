@@ -31,6 +31,8 @@ export type Session = {
   waiting?: { kind: 'question' | 'plan'; text: string } | null;
   context?: { tokens?: number; window: number; percent?: number } | null;
   cost?: number | null;
+  // Pictures the session's tools returned (bytes at /api/sessions/:id/images/:img).
+  images?: { id: string; ts: number; tool: string; mediaType: string; size: number }[];
 };
 
 // One word for what a session is doing, for dots and tooltips. Bridge state

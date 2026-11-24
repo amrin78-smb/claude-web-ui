@@ -1,6 +1,7 @@
 <script lang="ts">
   import { sessions, activeId, setActive, restartSession, resumeSession, syncSession } from '../stores/sessions';
   import { showPalette, showSettings, showDashboard, showDiff, openFolderPicker } from '../stores/ui';
+  import { toggleImages } from '../stores/images';
   import { theme } from '../stores/theme';
 
   type Command = { label: string; run: () => void };
@@ -28,6 +29,7 @@
     }
     list.push({ label: 'Show session overview', run: () => showDashboard.set(true) });
     list.push({ label: 'Toggle changes panel', run: () => showDiff.update((v) => !v) });
+    list.push({ label: 'Toggle images panel', run: () => toggleImages() });
     list.push({ label: 'Open settings', run: () => showSettings.set(true) });
     // Opens Settings, where the actual confirm-then-progress flow lives (App section).
     list.push({ label: 'Update app', run: () => showSettings.set(true) });

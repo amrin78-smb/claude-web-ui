@@ -3,6 +3,7 @@
   import { conn } from '../lib/connection';
   import { sessions, activeId, restartSession, syncSession } from '../stores/sessions';
   import { showSettings, showDashboard, showDiff, openFolderPicker, toast } from '../stores/ui';
+  import { showImages, toggleImages, activeImages } from '../stores/images';
   import { theme } from '../stores/theme';
   import { build } from '../stores/build';
   import StatusDot from './StatusDot.svelte';
@@ -114,6 +115,7 @@
   <div class="right">
     <button class="ghost labeled" onclick={() => showDashboard.update((v) => !v)} title="Session overview (Ctrl+Shift+O)"><Icon name="grid" size={14} /> Overview</button>
     <button class="ghost labeled" onclick={() => showDiff.update((v) => !v)} title="Toggle changes panel"><Icon name="git-branch" size={14} /> Diff</button>
+    <button class="ghost labeled" class:on={$showImages} onclick={toggleImages} title="Screenshots and images from this session's tools"><Icon name="image" size={14} /> Images{#if $activeImages.length}&nbsp;<span class="n">{$activeImages.length}</span>{/if}</button>
     <button class="ghost labeled" onclick={pickFolder} disabled={!$activeId} title="Open folder"><Icon name="folder" size={14} /> Folder</button>
     <button class="ghost iconbtn" onclick={pasteImage} disabled={!$activeId} title="Paste image"><Icon name="image" size={14} /></button>
     <button class="ghost iconbtn" onclick={attachFile} disabled={!$activeId} title="Attach file"><Icon name="paperclip" size={14} /></button>
@@ -215,6 +217,14 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+  .right .labeled.on {
+    color: var(--accent);
+  }
+  .right .labeled .n {
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
   }
   .right .iconbtn {
     display: inline-flex;

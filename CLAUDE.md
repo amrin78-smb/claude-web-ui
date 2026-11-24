@@ -160,6 +160,18 @@ is for whoever (human or Claude) is editing the code.
     going idle. "Waiting" counts as busy for the update warning: a restart
     throws away the question and its turn.
 
+    The mod also forwards **images** a tool returned (`type: 'image'`), because
+    the CLI only draws pictures in kitty/Ghostty/iTerm2 and xterm.js is none of
+    them — so a Playwright screenshot showed on claude.ai (Remote Control) but
+    never here. Two shapes exist: the built-in Read gives `{type:'image',
+    file:{base64, type}}`, MCP tools give content blocks `{type:'image',
+    source:{media_type, data}}`; `findImages()` walks for both. The server keeps
+    the last 20 per session in memory (40 MB cap), outside `blankBridge()` so a
+    respawn keeps them, lists metadata in `_wire().images`, and serves bytes at
+    `GET /api/sessions/:id/images/:img`. Only png/jpeg/gif/webp are accepted —
+    never SVG, which a browser would run script in. Image ids are random because
+    that URL is cached immutable and a counter restarts with the server.
+
     Testing the mod: `claude plugin validate ./mod`, then a real run — `claude
     -p "…" --plugin-dir ./mod` with the three env vars pointed at a throwaway
     listener shows every post. A Claude started from inside a session inherits

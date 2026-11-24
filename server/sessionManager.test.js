@@ -339,6 +339,27 @@ describe('SessionManager', () => {
       expect(sessions.list()[0]).toMatchObject({ bridged: false, activity: null, context: null, cost: null, busy: false });
     });
 
+    it('keeps the newest images, lists them without bytes, and serves them by id', () => {
+      const { id } = bridged();
+      for (let i = 0; i < 25; i++) {
+        sessions.bridgeEvent(id, { type: 'image', tool: 'shot', mediaType: 'image/png', bytes: Buffer.from([i]) });
+      }
+      const wire = sessions.list()[0];
+      expect(wire.images).toHaveLength(20);
+      expect(wire.images[0]).not.toHaveProperty('bytes');
+      const last = wire.images[19];
+      expect(sessions.image(id, last.id).bytes).toEqual(Buffer.from([24]));
+      expect(sessions.image(id, 'nope')).toBeNull();
+    });
+
+    it('keeps images across a respawn', () => {
+      const { id } = bridged();
+      sessions.bridgeEvent(id, { type: 'image', tool: 'shot', mediaType: 'image/png', bytes: Buffer.from([1]) });
+      claude.spawnClaude.mockReturnValue(fakePty());
+      sessions.restart(id, 80, 24);
+      expect(sessions.list()[0].images).toHaveLength(1);
+    });
+
     it('ignores events for unknown or stopped sessions', () => {
       const { pty, id } = bridged();
       expect(sessions.bridgeEvent('nope', { type: 'turn.start' })).toBe(false);

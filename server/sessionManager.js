@@ -43,6 +43,16 @@ function blankBridge() {
   return { bridged: false, activity: null, waiting: null, context: null, cost: null };
 }
 
+// Pictures tool calls handed Claude (screenshots, mostly), newest last. Kept in
+// memory only, and not reset on respawn: they are what the person looks back
+// through, and a restart shouldn't wipe the screenshot they were studying.
+const IMAGE_KEEP = 20;
+const IMAGE_BYTES_CAP = 40 * 1024 * 1024;
+
+function imageMeta(img) {
+  return { id: img.id, ts: img.ts, tool: img.tool, mediaType: img.mediaType, size: img.bytes.length };
+}
+
 // Where the open-session list is persisted so it survives a SERVER restart (not
 // just a page reload). We store only metadata (id/cwd/title) — never the live
 // pty — and rehydrate them as 'stopped' ghosts the user can resume.
@@ -88,7 +98,14 @@ class SessionManager extends EventEmitter {
       busy: !!s.busy, usage: s.usage || null, preview: s.preview || '',
       bridged: !!s.bridged, activity: s.activity || null, waiting: s.waiting || null,
       context: s.context || null, cost: s.cost ?? null,
+      images: (s.images || []).map(imageMeta),
     };
+  }
+
+  // One stored picture's bytes, for GET /api/sessions/:id/images/:img.
+  image(id, imageId) {
+    const s = this.sessions.get(id);
+    return (s && s.images && s.images.find(i => i.id === imageId)) || null;
   }
 
   // List all sessions as wire objects.
@@ -244,6 +261,17 @@ class SessionManager extends EventEmitter {
         // API error) is worth telling them about.
         if (ev.reason !== 'aborted') {
           this.emit('idle', { id: s.id, title: s.title, preview: s.preview });
+        }
+        break;
+      }
+      case 'image': {
+        if (!s.images) s.images = [];
+        // Random, not a counter: the URL is cached as immutable, and a counter
+        // restarts with the server while the session id carries on.
+        s.images.push({ id: crypto.randomUUID(), ts: Date.now(), tool: ev.tool, mediaType: ev.mediaType, bytes: ev.bytes });
+        let total = s.images.reduce((n, i) => n + i.bytes.length, 0);
+        while (s.images.length > IMAGE_KEEP || (s.images.length > 1 && total > IMAGE_BYTES_CAP)) {
+          total -= s.images.shift().bytes.length;
         }
         break;
       }

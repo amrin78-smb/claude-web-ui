@@ -12,6 +12,9 @@
   import Terminal from './components/Terminal.svelte';
   import Dashboard from './components/Dashboard.svelte';
   import DiffPanel from './components/DiffPanel.svelte';
+  import ImagePanel from './components/ImagePanel.svelte';
+  import ImageViewer from './components/ImageViewer.svelte';
+  import { showImages } from './stores/images';
   import CommandPalette from './components/CommandPalette.svelte';
   import FolderPicker from './components/FolderPicker.svelte';
   import Settings from './components/Settings.svelte';
@@ -137,9 +140,12 @@
           {/each}
         {/if}
         {#if $showDashboard}<Dashboard />{/if}
+        <ImageViewer />
       </div>
       {#if $showDiff}
         <div class="diff-wrap"><DiffPanel /></div>
+      {:else if $showImages}
+        <div class="diff-wrap"><ImagePanel /></div>
       {/if}
     </div>
   </main>

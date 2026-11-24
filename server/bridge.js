@@ -68,7 +68,12 @@ function launchFor(sessionId, env = process.env) {
   };
 }
 
-const TYPES = new Set(['start', 'turn.start', 'turn.complete', 'measure', 'ask', 'answered', 'end']);
+const TYPES = new Set(['start', 'turn.start', 'turn.complete', 'measure', 'ask', 'answered', 'end', 'image']);
+
+// Pictures we will hold and serve back to the page: only types a browser draws
+// as an <img>, never SVG (script), and a size cap well past any screenshot.
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_IMAGE_BASE64 = 12 * 1024 * 1024;
 
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
@@ -95,6 +100,14 @@ function parseEvent(body) {
     ev.cost = num(body.cost);
   } else if (type === 'end') {
     ev.conversation = str(body.conversation, 100);
+  } else if (type === 'image') {
+    if (!IMAGE_TYPES.has(body.mediaType)) return null;
+    if (typeof body.data !== 'string' || !body.data || body.data.length > MAX_IMAGE_BASE64) return null;
+    const bytes = Buffer.from(body.data, 'base64');
+    if (!bytes.length) return null;
+    ev.mediaType = body.mediaType;
+    ev.bytes = bytes;
+    ev.tool = str(body.tool, 100);
   }
   return ev;
 }

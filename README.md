@@ -137,6 +137,13 @@ not all of them at once.
   small built-in Claude Code mod in `mod/` that every session loads; it needs
   Claude Code 2.1.287 or newer, and older versions fall back to guessing from
   terminal output, as before. Set `CLAUDE_WEB_UI_NO_MOD=1` to turn it off.
+- **🖼 Images panel** — screenshots Claude takes while testing your app or game
+  (Playwright and other browser tools), and images it opens with Read, show up
+  in the **Images** panel next to **Diff**, newest first; click one for full
+  size and use ←/→ to step through. The browser terminal can't draw pictures
+  the way claude.ai does, so the built-in mod passes them over. A new one pops
+  up in the corner while the panel is closed. The last 20 per session are kept
+  in memory until the app restarts.
 - **Multiple projects at once** — a **sidebar** of projects/sessions and a **tab
   bar** let you run several Claude sessions in different folders side by side and
   switch instantly.
