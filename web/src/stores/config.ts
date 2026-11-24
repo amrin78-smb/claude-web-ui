@@ -3,6 +3,9 @@ import { conn } from '../lib/connection';
 
 export type SyncRepo = { name: string; url: string; branch?: string };
 
+/** Cloudflare Access setup for reaching this server through a tunnel. */
+export type RemoteAccess = { hostname: string; teamDomain: string; aud: string };
+
 export type Config = {
   repoUrl: string;
   branch: string;
@@ -13,6 +16,7 @@ export type Config = {
   pinned: string[];
   syncWorkDir: string;
   syncRepos: SyncRepo[];
+  remote: RemoteAccess;
 };
 
 const DEFAULT: Config = {
@@ -24,6 +28,7 @@ const DEFAULT: Config = {
   pinned: [],
   syncWorkDir: '',
   syncRepos: [],
+  remote: { hostname: '', teamDomain: '', aud: '' },
 };
 
 export const config = writable<Config>({ ...DEFAULT });
@@ -39,6 +44,7 @@ conn.on((m) => {
       pinned: m.pinned ?? c.pinned,
       syncWorkDir: m.syncWorkDir ?? c.syncWorkDir,
       syncRepos: m.syncRepos ?? c.syncRepos,
+      remote: m.remote ?? c.remote,
     }));
   }
 });

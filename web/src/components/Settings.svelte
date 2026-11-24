@@ -15,6 +15,14 @@
   let autoSync = $state($config.autoSync);
   let autoResume = $state($config.autoResume);
 
+  // ---- remote access through a Cloudflare Tunnel + Access (remoteAccess.js) ----
+  let remoteHost = $state($config.remote?.hostname ?? '');
+  let remoteTeam = $state($config.remote?.teamDomain ?? '');
+  let remoteAud = $state($config.remote?.aud ?? '');
+  const remoteFilled = $derived([remoteHost, remoteTeam, remoteAud].filter((v) => v.trim()).length);
+  // Opened through the tunnel: changing these can lock this very page out.
+  const viewingRemotely = location.hostname !== '127.0.0.1' && location.hostname !== 'localhost';
+
   // ---- workspace repo sync (clone/pull a fixed list of repos into a fixed
   // root folder, independent of any session's own cwd) ----
   let syncWorkDir = $state($config.syncWorkDir);
@@ -442,6 +450,7 @@
       autoResume,
       syncWorkDir: syncWorkDir.trim(),
       syncRepos,
+      remote: { hostname: remoteHost.trim(), teamDomain: remoteTeam.trim(), aud: remoteAud.trim() },
     });
     toast('settings saved');
     close();
@@ -663,6 +672,41 @@
             conversation when there is one — instead of asking first. Turn this off to get
             the "Resume or start fresh" prompt back. "Restart" always starts a fresh
             conversation either way.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="eyebrow">Remote access</div>
+        <div class="hint">
+          Use this app from another computer or your phone through a Cloudflare Tunnel, with
+          Cloudflare Access asking you to log in first. This server checks that login on every
+          request, so if any of these is missing or wrong, remote visits are refused —
+          never let through. Visits from this machine always work.
+        </div>
+        <div class="field">
+          <label for="set-remote-host">Hostname</label>
+          <input id="set-remote-host" type="text" placeholder="cc.example.com" bind:value={remoteHost} spellcheck="false" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="set-remote-team">Zero Trust team domain</label>
+          <input id="set-remote-team" type="text" placeholder="yourteam.cloudflareaccess.com" bind:value={remoteTeam} spellcheck="false" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="set-remote-aud">Access application audience (AUD) tag</label>
+          <input id="set-remote-aud" type="text" placeholder="64 hex characters, from the Access app's settings" bind:value={remoteAud} spellcheck="false" autocomplete="off" />
+          <div class="hint">
+            {#if remoteFilled === 3}
+              Remote access is on for https://{remoteHost.trim().replace(/^https?:\/\//, '')} once saved.
+            {:else if remoteFilled > 0}
+              Fill in all three to turn remote access on.
+            {:else}
+              Off. Leave all three empty to keep it that way.
+            {/if}
+            {#if viewingRemotely}
+              <strong>You're using this page remotely:</strong> a wrong value here locks this page
+              out until you fix it from the machine itself.
+            {/if}
           </div>
         </div>
       </section>

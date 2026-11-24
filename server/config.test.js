@@ -20,6 +20,7 @@ describe('loadConfig', () => {
       pinned: ['C:\\a'],
       syncWorkDir: 'C:\\NocVault',
       syncRepos: [{ name: 'x', url: 'https://example.com/x.git' }],
+      remote: { hostname: 'cc.example.com', teamDomain: 'team.cloudflareaccess.com', aud: 'abc' },
     }));
     expect(loadConfig()).toEqual({
       repoUrl: 'https://example.com/repo.git',
@@ -31,6 +32,7 @@ describe('loadConfig', () => {
       pinned: ['C:\\a'],
       syncWorkDir: 'C:\\NocVault',
       syncRepos: [{ name: 'x', url: 'https://example.com/x.git' }],
+      remote: { hostname: 'cc.example.com', teamDomain: 'team.cloudflareaccess.com', aud: 'abc' },
     });
   });
 
@@ -38,7 +40,7 @@ describe('loadConfig', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ repoUrl: 'x' }));
     expect(loadConfig()).toEqual({
       repoUrl: 'x', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
-      syncWorkDir: '', syncRepos: [],
+      syncWorkDir: '', syncRepos: [], remote: { hostname: '', teamDomain: '', aud: '' },
     });
   });
 
@@ -56,7 +58,7 @@ describe('loadConfig', () => {
     vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('ENOENT'); });
     expect(loadConfig()).toEqual({
       repoUrl: '', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
-      syncWorkDir: '', syncRepos: [],
+      syncWorkDir: '', syncRepos: [], remote: { hostname: '', teamDomain: '', aud: '' },
     });
   });
 
@@ -64,7 +66,7 @@ describe('loadConfig', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue('{not json');
     expect(loadConfig()).toEqual({
       repoUrl: '', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
-      syncWorkDir: '', syncRepos: [],
+      syncWorkDir: '', syncRepos: [], remote: { hostname: '', teamDomain: '', aud: '' },
     });
   });
 });
@@ -76,7 +78,7 @@ describe('saveConfig', () => {
     const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
     const cfg = {
       repoUrl: 'x', branch: '', autoSync: false, autoResume: true, cwd: '', recents: [], pinned: [],
-      syncWorkDir: '', syncRepos: [],
+      syncWorkDir: '', syncRepos: [], remote: { hostname: '', teamDomain: '', aud: '' },
     };
     saveConfig(cfg);
     expect(writeSpy).toHaveBeenCalledTimes(1);

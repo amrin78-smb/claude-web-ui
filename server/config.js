@@ -2,7 +2,9 @@
  *
  * Config shape:
  * { repoUrl, branch, autoSync, autoResume, cwd, recents:[], pinned:[],
- *   syncWorkDir, syncRepos:[{name,url,branch}] }
+ *   syncWorkDir, syncRepos:[{name,url,branch}], remote:{hostname,teamDomain,aud} }
+ * remote is the Cloudflare Access setup for using this server through a
+ * tunnel (see remoteAccess.js); all three empty means remote access is off.
  * recents/pinned are new in v2 and always default to []. syncWorkDir/syncRepos
  * back the "workspace sync" feature (Settings > Workspace repos) — a fixed
  * root folder plus a list of repos to clone/pull on demand, independent of
@@ -15,6 +17,12 @@ const path = require('path');
 // root, but a per-user directory when that isn't writable (see paths.js).
 const { STATE_DIR } = require('./paths');
 const CONFIG_PATH = path.join(STATE_DIR, 'config.json');
+
+function normalizeRemote(r) {
+  const s = v => (typeof v === 'string' ? v.trim().slice(0, 300) : '');
+  r = r && typeof r === 'object' ? r : {};
+  return { hostname: s(r.hostname), teamDomain: s(r.teamDomain), aud: s(r.aud) };
+}
 
 function loadConfig() {
   let raw = {};
@@ -37,6 +45,7 @@ function loadConfig() {
     pinned: Array.isArray(raw.pinned) ? raw.pinned : [],
     syncWorkDir: raw.syncWorkDir || '',
     syncRepos: Array.isArray(raw.syncRepos) ? raw.syncRepos : [],
+    remote: normalizeRemote(raw.remote),
   };
 }
 
@@ -48,4 +57,4 @@ function saveConfig(c) {
   }
 }
 
-module.exports = { loadConfig, saveConfig, CONFIG_PATH };
+module.exports = { loadConfig, saveConfig, normalizeRemote, CONFIG_PATH };

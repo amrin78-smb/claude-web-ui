@@ -13,6 +13,7 @@
   import Dashboard from './components/Dashboard.svelte';
   import DiffPanel from './components/DiffPanel.svelte';
   import ImagePanel from './components/ImagePanel.svelte';
+  import KeyBar from './components/KeyBar.svelte';
   import ImageViewer from './components/ImageViewer.svelte';
   import { showImages } from './stores/images';
   import CommandPalette from './components/CommandPalette.svelte';
@@ -148,6 +149,7 @@
         <div class="diff-wrap"><ImagePanel /></div>
       {/if}
     </div>
+    <KeyBar />
   </main>
 </div>
 
@@ -163,7 +165,17 @@
 <Toasts />
 
 <style>
-  .layout { display: grid; grid-template-columns: auto 1fr; height: 100vh; }
+  /* dvh, not vh: on a phone 100vh includes the area under the browser's own
+     toolbar, which pushes the key bar off screen. */
+  .layout { display: grid; grid-template-columns: auto 1fr; height: 100vh; height: 100dvh; }
+  /* Phone width: the session tabs already list every session, so the sidebar
+     goes, and a side panel takes the whole width instead of a third of it. */
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; }
+    .layout > :global(.sidebar) { display: none; }
+    .diff-wrap { position: absolute; inset: 0; z-index: 15; width: auto; min-width: 0; max-width: none; border-left: 0; }
+    .body { position: relative; }
+  }
   main { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
   .body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .stage { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }

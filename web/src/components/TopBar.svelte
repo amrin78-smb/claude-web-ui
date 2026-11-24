@@ -218,6 +218,12 @@
     align-items: center;
     gap: 6px;
   }
+  /* Phone width: drop the path and shortcut hint, keep icons, scroll the rest. */
+  @media (max-width: 760px) {
+    .path, .hint, .conn-label, .build { display: none; }
+    .right { overflow-x: auto; min-width: 0; }
+    .topbar { gap: 6px; }
+  }
   .right .labeled.on {
     color: var(--accent);
   }

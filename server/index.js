@@ -16,7 +16,8 @@ const { WebSocketServer } = require('ws');
 
 const { CLAUDE, claudeStatus, readCliVersion } = require('./claude');
 const bridge = require('./bridge');
-const { loadConfig, saveConfig } = require('./config');
+const { loadConfig, saveConfig, normalizeRemote } = require('./config');
+const remoteAccess = require('./remoteAccess');
 const { listDir } = require('./fs');
 const { syncRepo, syncAllRepos, gitDiff, scanRepos } = require('./git');
 const { runUpdate, systemdUserUnit } = require('./update');
@@ -47,6 +48,17 @@ function defaultCwd() {
 
 // ---- HTTP / static -------------------------------------------------------
 const app = express();
+
+// Every request, static files included, is either plainly local or carries a
+// valid Cloudflare Access login for the configured app (remoteAccess.js).
+// First in the chain so nothing — not even index.html — is served otherwise.
+app.use((req, res, next) => {
+  remoteAccess.check(req, { port: PORT, cfg: loadConfig() }).then(r => {
+    if (r.ok) return next();
+    res.status(403).type('text/plain').send(`Forbidden: ${r.reason}.\n`);
+  }, next);
+});
+
 app.use(express.json({ limit: '64mb' }));
 
 // In production the frontend is built to web/dist; serve it if present. In dev,
@@ -143,10 +155,22 @@ const ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:5173', // vite dev server (npm run dev) proxies /ws here
   'http://localhost:5173',
 ]);
+//
+// A remote connection (through the tunnel) must also pass the Access check,
+// and its Origin must be the configured remote hostname — the same reasoning
+// as above, with the remote page's own origin standing in for localhost's.
 const wss = new WebSocketServer({
   server,
   path: '/ws',
-  verifyClient: ({ origin }) => !origin || ALLOWED_ORIGINS.has(origin),
+  verifyClient: ({ origin, req }, done) => {
+    const cfg = loadConfig();
+    remoteAccess.check(req, { port: PORT, cfg }).then(r => {
+      if (!r.ok) return done(false, 403);
+      if (!r.remote) return done(!origin || ALLOWED_ORIGINS.has(origin), 403);
+      const settings = remoteAccess.remoteSettings(cfg);
+      done(origin === settings.origin, 403);
+    }, () => done(false, 500));
+  },
 });
 
 // Attaching to an existing server makes ws re-emit that server's 'error' here
@@ -188,6 +212,7 @@ function configPayload() {
     pinned: cfg.pinned || [],
     syncWorkDir: cfg.syncWorkDir || '',
     syncRepos: cfg.syncRepos || [],
+    remote: cfg.remote,
   };
 }
 
@@ -299,6 +324,7 @@ wss.on('connection', (ws) => {
         if ('pinned' in msg) cfg.pinned = Array.isArray(msg.pinned) ? msg.pinned : [];
         if ('syncWorkDir' in msg) cfg.syncWorkDir = msg.syncWorkDir || '';
         if ('syncRepos' in msg) cfg.syncRepos = Array.isArray(msg.syncRepos) ? msg.syncRepos : [];
+        if ('remote' in msg) cfg.remote = normalizeRemote(msg.remote);
         saveConfig(cfg);
         // Keep every open tab in sync.
         broadcastConfig();
@@ -616,6 +642,8 @@ server.on('listening', () => {
   // noise. When it moved, saying so is the difference between finding your
   // config and concluding the app lost it.
   if (paths.stateIsElsewhere) console.log(`  State:     ${paths.STATE_DIR}`);
+  const remote = remoteAccess.remoteSettings(loadConfig());
+  if (remote) console.log(`  Remote:    ${remote.origin} (Cloudflare Access, ${remote.teamDomain})`);
   console.log(`  Restored sessions: ${restored}\n`);
 });
 server.listen(PORT, HOST);

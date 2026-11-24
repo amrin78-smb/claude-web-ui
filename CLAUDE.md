@@ -179,6 +179,32 @@ is for whoever (human or Claude) is editing the code.
     server tests or "resume" finds nothing. The CLI writes `types/` and
     `tsconfig.json` into the mod folder when it loads it (gitignored, and
     filtered out by `package.js`); from a read-only `/opt` it just doesn't.
+  - `remoteAccess.js` — remote use through a Cloudflare Tunnel + Access. The
+    server still only listens on 127.0.0.1, but a tunnelled request is a
+    loopback connection too, so "connected to 127.0.0.1" stopped meaning "came
+    from this machine". Every HTTP request (static files included, first
+    middleware) and every ws handshake is sorted: **local** = Host is our own
+    loopback address (or Vite's :5173) *and* no `cf-*` headers; anything else is
+    **remote** and needs a valid Access JWT (`Cf-Access-Jwt-Assertion` or the
+    `CF_Authorization` cookie): RS256 only, signature against
+    `https://<team>/cdn-cgi/access/certs` (cached, one rate-limited refetch on an
+    unknown `kid`), `aud` = the configured AUD tag, `iss` = the team, not expired.
+    Not configured => remote is refused. This fails closed on purpose: a session
+    is a shell, and a deleted or misconfigured Access app would otherwise hand
+    the tunnel straight to it. The Host check also closes DNS rebinding for plain
+    HTTP, which the old Origin-only check (ws only) didn't cover. A remote ws
+    must additionally have Origin = `https://<hostname>`. Settings live in
+    `config.json` `remote: {hostname, teamDomain, aud}` (Settings → Remote access).
+    The bridge mod posts to 127.0.0.1, so it is always local.
+
+    PWA: `web/public/manifest.webmanifest` + `sw.js` (caches nothing — the page
+    is a live view, and index.html is no-store). The manifest `<link>` has
+    `crossorigin="use-credentials"`: without it the browser fetches the manifest
+    cookie-less, Access redirects it to the login page, and the app is silently
+    "not installable". Icons were rendered from `favicon.svg`; regenerate them
+    the same way if it changes. `KeyBar.svelte` shows on `(pointer: coarse)`
+    only and sends on pointerdown with preventDefault so the terminal keeps
+    focus (otherwise each tap closes the phone keyboard).
   - `config.js` — load/save `config.json` (repo URL/branch/autoSync,
     recent/pinned folders). Normalizes shape on load.
 - `web/` — frontend, Vite + Svelte 5 (runes mode) + TypeScript.

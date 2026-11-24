@@ -144,6 +144,16 @@ not all of them at once.
   the way claude.ai does, so the built-in mod passes them over. A new one pops
   up in the corner while the panel is closed. The last 20 per session are kept
   in memory until the app restarts.
+- **Use it from anywhere, installed as an app** — put the server behind a
+  Cloudflare Tunnel with a Cloudflare Access login in front, then fill in
+  **Settings → Remote access** (hostname, Zero Trust team domain, and the Access
+  app's AUD tag). The server checks Cloudflare's signed login on every request
+  and refuses anything remote it can't verify — including when remote access
+  isn't set up — so a mistake in the Cloudflare setup fails closed rather than
+  exposing a shell. Visits from the machine itself always work. The page is an
+  installable app (Chrome/Edge: the install icon in the address bar; iPhone:
+  Share → Add to Home Screen), and on a touch screen a key bar adds the keys a
+  phone keyboard lacks: Esc, Tab, Shift+Tab, arrows, Ctrl+C and Enter.
 - **Multiple projects at once** — a **sidebar** of projects/sessions and a **tab
   bar** let you run several Claude sessions in different folders side by side and
   switch instantly.
